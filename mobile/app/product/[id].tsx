@@ -88,6 +88,12 @@ export default function ProductDetail() {
             <Text style={[font.body, { color: colors.primary }]}>Orqaga</Text>
           </View>
         </Pressable>
+        <Pressable onPress={() => router.push(`/product/edit/${p.id}`)} hitSlop={10}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs }}>
+            <Icon name="tahrir" size={17} color={colors.primary} />
+            <Text style={[font.body, { color: colors.primary }]}>Tahrirlash</Text>
+          </View>
+        </Pressable>
       </View>
 
       <ScrollView contentContainerStyle={s.scroll}>
@@ -215,7 +221,10 @@ export default function ProductDetail() {
 }
 
 const s = StyleSheet.create({
-  head: { padding: spacing.lg, paddingBottom: spacing.sm },
+  head: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    padding: spacing.lg, paddingBottom: spacing.sm,
+  },
   scroll: { padding: spacing.lg, paddingTop: 0, gap: spacing.md, paddingBottom: spacing.xxl },
   photo: { width: '100%', height: 190, borderRadius: radius.lg },
   rowBetween: {

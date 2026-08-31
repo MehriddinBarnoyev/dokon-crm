@@ -125,6 +125,16 @@ export default async function productRoutes(app: FastifyInstance) {
     return one(`SELECT * FROM products WHERE id = $1`, [res.id]);
   });
 
+  /**
+   * Mahsulotni tahrirlash — xato kiritilgan nom, narx yoki birlikni to'g'rilash.
+   *
+   * Qoldiq bu yerda o'zgarmaydi: u ombor jurnaliga yozilishi kerak, shuning
+   * uchun `/:id/adjust` orqali boradi. Narx tarixga ham tegmaydi — sotuvda
+   * o'sha kundagi narx `sale_items` ichida saqlangan.
+   *
+   * `is_active: false` — mahsulotni arxivlash. O'chirmaymiz: eski savdolar
+   * unga bog'liq, o'chirilsa hisobot buziladi.
+   */
   app.patch('/:id', async (req, reply) => {
     const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
     const body = z.object({
@@ -136,18 +146,42 @@ export default async function productRoutes(app: FastifyInstance) {
       barcode: z.string().nullable().optional(),
       photo_url: z.string().nullable().optional(),
       is_active: z.boolean().optional(),
+      /** Kategoriya nomi bilan keladi — yo'q bo'lsa yaratiladi. */
+      category: z.string().nullable().optional(),
     }).parse(req.body);
 
-    const keys = Object.keys(body) as (keyof typeof body)[];
-    if (keys.length === 0) return reply.code(400).send({ error: 'O\'zgartirish uchun maydon yo\'q' });
+    const { category, ...columns } = body;
+    const keys = Object.keys(columns) as (keyof typeof columns)[];
+    if (keys.length === 0 && category === undefined) {
+      return reply.code(400).send({ error: 'O\'zgartirish uchun maydon yo\'q' });
+    }
 
-    const sets = keys.map((k, i) => `${k} = $${i + 1}`);
-    const params: unknown[] = keys.map((k) => body[k]);
-    params.push(id, req.auth.shop_id);
+    const updated = await tx(async (c) => {
+      const sets = keys.map((k, i) => `${k} = $${i + 1}`);
+      const params: unknown[] = keys.map((k) => columns[k]);
 
-    const updated = await one(
-      `UPDATE products SET ${sets.join(', ')}, updated_at = now()
-        WHERE id = $${params.length - 1} AND shop_id = $${params.length} RETURNING *`, params);
+      // Kategoriya alohida: bazada nom emas, category_id turadi.
+      if (category !== undefined) {
+        let categoryId: string | null = null;
+        if (category && category.trim()) {
+          const cat = await one<{ id: string }>(
+            `INSERT INTO categories (shop_id, name) VALUES ($1, $2)
+             ON CONFLICT (shop_id, name) DO UPDATE SET name = EXCLUDED.name
+             RETURNING id`, [req.auth.shop_id, category.trim()], c);
+          categoryId = cat!.id;
+        }
+        params.push(categoryId);
+        sets.push(`category_id = $${params.length}`);
+      }
+
+      params.push(id, req.auth.shop_id);
+      return one(
+        `UPDATE products p SET ${sets.join(', ')}, updated_at = now()
+          WHERE p.id = $${params.length - 1} AND p.shop_id = $${params.length}
+        RETURNING p.*, (SELECT name FROM categories WHERE id = p.category_id) AS category`,
+        params, c);
+    });
+
     if (!updated) return reply.code(404).send({ error: 'Mahsulot topilmadi' });
     return updated;
   });

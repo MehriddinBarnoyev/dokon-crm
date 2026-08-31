@@ -43,6 +43,7 @@ const ICONS = {
   oldinga:    ion('chevron-forward'),
   kamera:     ion('camera-outline'),
   shtrix:     ion('barcode-outline'),
+  tahrir:     ion('create-outline'),
   galereya:   ion('images-outline'),
   telefon:    ion('call-outline'),
   qidiruv:    ion('search-outline'),
