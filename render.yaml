@@ -12,6 +12,13 @@ databases:
     user: dokon
     plan: free
     postgresMajorVersion: "16"
+
+    # MINTAQA SERVIS BILAN BIR XIL BO'LISHI SHART.
+    # Render bazaga ichki manzil beradi (dpg-…-a) va u FAQAT o'sha mintaqadagi
+    # servisdan ko'rinadi. Bu yer ko'rsatilmasa Render sukut bo'yicha Oregon'da
+    # yaratadi, servis esa Frankfurt'da qoladi — natijada migratsiya
+    # "getaddrinfo ENOTFOUND dpg-…-a" bilan yiqiladi.
+    region: frankfurt
     # DIQQAT: Render'ning bepul bazasi 30 kundan keyin O'CHIRILADI.
     # Doimiy ishlatish uchun pullik planga o'ting yoki muntazam
     # `pg_dump` bilan zaxira oling.

@@ -29,6 +29,54 @@ const TARTIB = [
   '003-search-staged.sql',
 ];
 
+/** Ulanish xatosimi (bazaga umuman yetib bo'lmadi) yoki boshqa xatomi? */
+function ulanishXatosi(e: unknown): boolean {
+  const kod = (e as { code?: string })?.code;
+  return kod === 'ENOTFOUND' || kod === 'ECONNREFUSED'
+    || kod === 'ETIMEDOUT' || kod === 'EAI_AGAIN';
+}
+
+/**
+ * Bazaga ulanadi. Birinchi deploy'da baza hali ko'tarilmagan bo'lishi mumkin,
+ * shuning uchun bir necha marta urinamiz.
+ *
+ * Urinishlar tugasa xatoni AYTIB beramiz: ENOTFOUND deyarli har doim bitta
+ * narsani anglatadi — servis va baza HAR XIL MINTAQADA. Render bazaga ichki
+ * manzil beradi va u boshqa mintaqadan ko'rinmaydi.
+ */
+async function ulan(urinishlar = 5): Promise<pg.Client> {
+  for (let i = 1; i <= urinishlar; i++) {
+    // Har urinishda YANGI klient: muvaffaqiyatsiz connect() dan keyin
+    // pg klientni qayta ishlatib bo'lmaydi ("cannot reuse a client").
+    const client = new pg.Client({
+      connectionString: env.databaseUrl,
+      ssl: sslConfig(env.databaseUrl),
+    });
+    try {
+      await client.connect();
+      return client;
+    } catch (e) {
+      await client.end().catch(() => {});
+      if (!ulanishXatosi(e) || i === urinishlar) {
+        if (ulanishXatosi(e)) {
+          const host = (() => {
+            try { return new URL(env.databaseUrl).hostname; } catch { return '?'; }
+          })();
+          throw new Error(
+            `Bazaga ulanib bo'lmadi: ${host}\n`
+            + '  Render ichki manzili (dpg-…-a) faqat BIR XIL MINTAQADAGI\n'
+            + '  servisdan ko\'rinadi. render.yaml da baza va web servisning\n'
+            + '  `region:` qiymati bir xil ekanini tekshiring.');
+        }
+        throw e;
+      }
+      console.log(`[migrate] baza hali tayyor emas, ${i}/${urinishlar} — 3s kutamiz…`);
+      await new Promise((r) => setTimeout(r, 3000));
+    }
+  }
+  throw new Error('ulanib bo\'lmadi');   // bu yerga yetib kelmaydi
+}
+
 async function main() {
   // Ro'yxatga tushmay qolgan fayl bo'lsa — jim o'tkazib yubormaymiz.
   // Unutilgan migratsiya deploy'dan keyin tushunarsiz xatolarga olib keladi.
@@ -40,11 +88,7 @@ async function main() {
       + 'src/migrate.ts dagi TARTIB ga qo\'shing.');
   }
 
-  const client = new pg.Client({
-    connectionString: env.databaseUrl,
-    ssl: sslConfig(env.databaseUrl),
-  });
-  await client.connect();
+  const client = await ulan();
 
   try {
     for (const fayl of TARTIB) {
