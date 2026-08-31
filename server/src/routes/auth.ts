@@ -56,7 +56,6 @@ export default async function authRoutes(app: FastifyInstance) {
     return { token: app.jwt.sign(user), user };
   });
 
-  /** Sotuvchi qo'shish (do'kon egasi tomonidan) */
   app.post('/staff', { preHandler: requireAuth }, async (req, reply) => {
     if (req.auth.role !== 'owner') {
       return reply.code(403).send({ error: 'Faqat do\'kon egasi xodim qo\'sha oladi' });
