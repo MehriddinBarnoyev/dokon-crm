@@ -49,6 +49,9 @@
     "scheme": "dokoncrm",
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "apiUrl": "https://dokon-api.onrender.com"
     }
   }
 }

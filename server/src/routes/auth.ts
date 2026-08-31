@@ -17,7 +17,6 @@ const LoginBody = z.object({
 });
 
 export default async function authRoutes(app: FastifyInstance) {
-  /** Yangi do'kon + egasi ro'yxatdan o'tkaziladi. */
   app.post('/register', async (req, reply) => {
     const body = RegisterBody.parse(req.body);
 
