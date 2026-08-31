@@ -111,3 +111,11 @@ export interface VisionResponse {
   ishonch: number; izoh: string | null;
   mavjud: Array<{ id: string; name: string; unit: Unit; sale_price: number; stock: number }>;
 }
+
+/** Yangi mahsulot formasi uchun serverdan keladigan tayyor qiymatlar. */
+export interface ProductDefaults {
+  /** Do'konning odatdagi ustamasi, ulush ko'rinishida: 0.25 = +25%. */
+  markup: number;
+  /** Eng ko'p ishlatiladigan kategoriyalar — chip qilib ko'rsatiladi. */
+  categories: string[];
+}

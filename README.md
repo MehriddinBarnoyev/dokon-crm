@@ -586,9 +586,28 @@ Mahalliyda ham ishlatsa bo'ladi: `npm run db:migrate:dev`.
   va server uyquda uyg'onganda tozalanadi. Doimiy saqlash uchun `render.yaml`
   dagi `disk:` blokini yoqing (pullik plan) yoki S3/Cloudflare R2 ga o'ting.
 
-Yana biri: bepul web-servis 15 daqiqa harakatsizlikdan keyin uxlaydi, keyingi
-so'rov ~50 soniya kutadi. Kassa uchun bu sezilarli — pullik plan yoki tashqi
-"ping" kerak bo'ladi.
+### Serverni uxlatmaslik
+
+Bepul web-servis **15 daqiqa harakatsizlikdan keyin uxlaydi**, keyingi so'rov
+~50 soniya kutadi. Kassada bu sezilarli: kunning birinchi mahsuloti yoki
+tushlikdan keyingi birinchi savdo har doim uzoq ochiladi.
+
+Yechim — tashqi "ping". Render'ning o'z cron'i pullik, shuning uchun bepul
+tashqi xizmat ishlatiladi ([cron-job.org](https://cron-job.org) yoki
+UptimeRobot). Sozlash:
+
+1. cron-job.org da ro'yxatdan o'ting → **Create cronjob**.
+2. URL: `https://dokon-api.onrender.com/health`
+   (`/health` autentifikatsiya so'ramaydi va bazaga tegmaydi — ping uchun arzon).
+3. Davri: **har 10 daqiqada** (15 daqiqalik chegaradan kichik bo'lishi shart).
+4. Vaqt oralig'i: **do'kon ish vaqti**, masalan 07:00–22:00.
+
+Nega faqat ish vaqtida: bepul planda oyiga 750 soat berilgan, bir oy esa
+~730 soat. Ya'ni bitta servisni sutkasiga 24 soat uyg'oq tutsangiz limit
+deyarli to'la ishlatiladi va ikkinchi servisga joy qolmaydi. 07:00–22:00
+oralig'ida esa oyiga ~450 soat ketadi — zaxira qoladi.
+
+Bu uyquni yo'qotadi, lekin bazaning 30 kunlik cheklovini yo'qotmaydi.
 
 **Mobil ilovani ulash.** Deploy tugagach Metro'ni server manzili bilan
 ishga tushiring:

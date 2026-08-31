@@ -67,15 +67,18 @@ export function Button({ title, onPress, variant = 'primary', loading, disabled,
  * `style` — tashqi o'ram uchun (masalan `flex: 1`).
  * Maydonning o'ziga uslub kerak bo'lsa `inputStyle` ishlatiladi.
  */
-export function Field({ label, hint, error, style, inputStyle, ...props }:
+export function Field({ label, hint, error, style, inputStyle, inputRef, ...props }:
   Omit<TextInputProps, 'style'> & {
     label?: string; hint?: string; error?: string;
     style?: ViewStyle; inputStyle?: TextInputProps['style'];
+    /** Fokusni tashqaridan boshqarish uchun (masalan, saqlab bo'lgach nomga qaytish). */
+    inputRef?: React.Ref<TextInput>;
   }) {
   return (
     <View style={[{ gap: spacing.xs }, style]}>
       {label ? <Text style={[font.small, { color: colors.textMuted }]}>{label}</Text> : null}
       <TextInput
+        ref={inputRef}
         placeholderTextColor={colors.textFaint}
         {...props}
         style={[s.input, error ? { borderColor: colors.danger } : null, inputStyle]}

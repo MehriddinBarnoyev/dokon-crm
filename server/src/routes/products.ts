@@ -171,6 +171,59 @@ export default async function productRoutes(app: FastifyInstance) {
       [req.auth.shop_id]));
 
   /**
+   * Shtrix-kod bo'yicha aniq qidiruv — skaner uchun.
+   * Topilsa, do'konchi yangi mahsulot yaratish o'rniga mavjudini ochadi.
+   * Yo'q bo'lsa 404 emas, `null` qaytadi: bu xato emas, oddiy holat.
+   */
+  app.get('/meta/barcode/:code', async (req) => {
+    const { code } = z.object({ code: z.string().min(1).max(64) }).parse(req.params);
+    const found = await one(
+      `SELECT p.id, p.name, p.unit, p.cost_price, p.sale_price, p.stock, p.min_stock,
+              p.barcode, p.photo_url, c.name AS category
+         FROM products p
+         LEFT JOIN categories c ON c.id = p.category_id
+        WHERE p.shop_id = $1 AND p.is_active AND p.barcode = btrim($2)
+        LIMIT 1`, [req.auth.shop_id, code]);
+    return { product: found ?? null };
+  });
+
+  /**
+   * Yangi mahsulot formasi uchun tayyor qiymatlar.
+   *
+   * markup — do'konning odatdagi ustamasi (mediana). Forma tan narxdan
+   * sotuv narxini shuning asosida taklif qiladi, do'konchi ustidan yozadi.
+   * Medianani olamiz: bitta g'alati mahsulot o'rtachani buzmasin.
+   * Ma'lumot yetarli bo'lmasa 25% — quruq taxmin emas, shunchaki boshlang'ich.
+   */
+  app.get('/meta/defaults', async (req) => {
+    const shop = req.auth.shop_id;
+    const [row, categories] = await Promise.all([
+      one<{ markup: number | null; soni: number }>(
+        `SELECT percentile_cont(0.5) WITHIN GROUP (
+                  ORDER BY (sale_price - cost_price) / cost_price)::float AS markup,
+                COUNT(*)::int AS soni
+           FROM products
+          WHERE shop_id = $1 AND is_active
+            AND cost_price > 0 AND sale_price > cost_price`, [shop]),
+
+      query<{ name: string }>(
+        `SELECT c.name
+           FROM categories c
+           JOIN products p ON p.category_id = c.id AND p.is_active
+          WHERE c.shop_id = $1
+          GROUP BY c.name
+          ORDER BY COUNT(p.id) DESC, c.name
+          LIMIT 8`, [shop]),
+    ]);
+
+    // Uchtadan kam mahsulotdan chiqqan "mediana" ishonchsiz — sukutga tushamiz.
+    const raw = (row?.soni ?? 0) >= 3 ? row?.markup ?? null : null;
+    const markup = raw === null ? 0.25 : Math.min(Math.max(raw, 0.02), 3);
+
+    return { markup, categories: categories.map((c) => c.name) };
+  });
+
+  /**
    * Filtr uchun mavjud variantlar — har birida nechta mahsulot borligi bilan.
    * Bo'sh kategoriya yoki ishlatilmagan birlikni ekranda ko'rsatmaymiz.
    */

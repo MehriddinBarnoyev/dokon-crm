@@ -42,6 +42,7 @@ const ICONS = {
   orqaga:     ion('chevron-back'),
   oldinga:    ion('chevron-forward'),
   kamera:     ion('camera-outline'),
+  shtrix:     ion('barcode-outline'),
   galereya:   ion('images-outline'),
   telefon:    ion('call-outline'),
   qidiruv:    ion('search-outline'),

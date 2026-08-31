@@ -1,12 +1,22 @@
 /**
  * Yangi mahsulot qo'shish.
- * Rasmga olish → AI nom/birlik/kategoriyani to'ldiradi → narxni do'konchi kiritadi.
- * AI narxni taxmin qilmaydi: u bozor narxini bilmaydi.
+ *
+ * Tezlik uchun qilingan narsalar:
+ *   • Shtrix-kod skanerlanadi — 13 ta raqamni qo'lda terish shart emas.
+ *     Skanerlangan kod bazada bo'lsa, yangi mahsulot yaratmay o'shanisi ochiladi.
+ *   • Sotuv narxi tan narxdan avtomatik taklif qilinadi (do'konning odatdagi
+ *     ustamasi bo'yicha). Do'konchi ustidan yozsa — taklif to'xtaydi.
+ *   • Ogohlantirish chegarasi birlikka qarab o'zi to'ladi.
+ *   • Kategoriya tayyor chiplardan tanlanadi.
+ *   • "Saqlab, yana qo'shish" — partiya kelganda ro'yxatga chiqib-kirish yo'q.
+ *
+ * Rasm ixtiyoriy: AI nom/birlik/kategoriyani to'ldiradi, ammo narxni
+ * taxmin qilmaydi — u bozor narxini bilmaydi.
  */
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator, Alert, KeyboardAvoidingView, Platform, Pressable,
-  ScrollView, StyleSheet, Text, View,
+  ScrollView, StyleSheet, Text, TextInput, View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -14,7 +24,7 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
 import { Image } from 'expo-image';
 import { api, uploadPhoto } from '../../src/api/client';
-import type { Unit, VisionResponse } from '../../src/api/types';
+import type { Product, ProductDefaults, Unit, VisionResponse } from '../../src/api/types';
 import { Badge, Button, Field } from '../../src/components/ui';
 import { useConfirm } from '../../src/components/Confirm';
 import { colors, font, money, radius, shadow, spacing } from '../../src/theme';
@@ -22,17 +32,36 @@ import { Icon } from '../../src/components/Icon';
 
 const UNITS: Unit[] = ['dona', 'kg', 'gram', 'litr', 'metr', 'quti', 'pachka'];
 
+/**
+ * Ogohlantirish chegarasi uchun boshlang'ich qiymat.
+ * Donalab sotiladigan narsa tezroq tugaydi, kilolik mahsulot esa zaxirada
+ * kamroq turadi — shuning uchun birlik bo'yicha ajratilgan.
+ */
+const MIN_STOCK_DEFAULT: Record<Unit, number> = {
+  dona: 5, quti: 3, pachka: 5, kg: 3, litr: 3, metr: 5, gram: 500,
+};
+
+/** Skaner qabul qiladigan kodlar — do'konda uchraydiganlari. */
+const BARCODE_TYPES = [
+  'ean13', 'ean8', 'upc_a', 'upc_e', 'code128', 'code39', 'code93', 'itf14', 'codabar',
+] as const;
+
+type CamMode = 'off' | 'photo' | 'barcode';
+
 export default function NewProductScreen() {
   const router = useRouter();
   const confirm = useConfirm();
   const cameraRef = useRef<CameraView>(null);
+  const scrollRef = useRef<ScrollView>(null);
+  const nameRef = useRef<TextInput>(null);
   const [permission, requestPermission] = useCameraPermissions();
 
-  const [cameraOpen, setCameraOpen] = useState(false);
+  const [camMode, setCamMode] = useState<CamMode>('off');
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [recognizing, setRecognizing] = useState(false);
   const [vision, setVision] = useState<VisionResponse | null>(null);
   const [saving, setSaving] = useState(false);
+  const [lastSaved, setLastSaved] = useState<string | null>(null);
 
   const [name, setName] = useState('');
   const [unit, setUnit] = useState<Unit>('dona');
@@ -42,6 +71,74 @@ export default function NewProductScreen() {
   const [stock, setStock] = useState('');
   const [minStock, setMinStock] = useState('');
   const [barcode, setBarcode] = useState('');
+
+  /**
+   * Do'konchi o'zi tekkan maydonni ustidan yozmaymiz. Avtomatik taklif
+   * faqat bo'sh yoki taklif qilingan qiymat turgan joyda ishlaydi.
+   */
+  const [saleTouched, setSaleTouched] = useState(false);
+  const [minTouched, setMinTouched] = useState(false);
+
+  const [defaults, setDefaults] = useState<ProductDefaults>({ markup: 0.25, categories: [] });
+
+  /** Bir kodni ikki marta o'qib yubormaslik uchun (kamera tez skanerlaydi). */
+  const scanLock = useRef(false);
+
+  useEffect(() => {
+    api<ProductDefaults>('/products/meta/defaults')
+      .then(setDefaults)
+      .catch(() => { /* tayyor qiymatsiz ham forma ishlaydi */ });
+  }, []);
+
+  /* --------------------- Avtomatik to'ldiriladigan maydonlar -------------------- */
+
+  /** Tan narxidan sotuv narxi taklifi. Do'konchi tegmagan bo'lsa yoziladi. */
+  useEffect(() => {
+    if (saleTouched) return;
+    const cost = Number(costPrice);
+    if (!cost || cost <= 0) { setSalePrice(''); return; }
+    // Chiroyli raqamga yaxlitlaymiz — do'konda 12 437 so'm degan narx bo'lmaydi.
+    // Yuqoriga: pastga yaxlitlash foydaning bir qismini yeb qo'yadi.
+    // Qadam narxga qarab: 300 so'mlik mahsulotni 500 ga yaxlitlash bo'lmaydi.
+    const step = cost >= 10000 ? 500 : cost >= 1000 ? 100 : 10;
+    const suggested = Math.ceil((cost * (1 + defaults.markup)) / step) * step;
+    setSalePrice(String(Math.max(suggested, cost)));
+  }, [costPrice, defaults.markup, saleTouched]);
+
+  /** Birlik almashsa chegara ham o'zgaradi — do'konchi tegmagan bo'lsa. */
+  useEffect(() => {
+    if (minTouched) return;
+    setMinStock(String(MIN_STOCK_DEFAULT[unit]));
+  }, [unit, minTouched]);
+
+  /* ------------------------------ Shtrix-kod ------------------------------ */
+
+  /**
+   * Skanerlangan kod bazada bormi? Bo'lsa — yangi yaratish o'rniga mavjudini
+   * ochishni taklif qilamiz. Bu takroriy mahsulotning oldini oladi.
+   */
+  async function afterScan(code: string) {
+    setBarcode(code);
+    try {
+      const res = await api<{ product: Product | null }>(
+        `/products/meta/barcode/${encodeURIComponent(code)}`);
+      if (res.product) {
+        const p = res.product;
+        Alert.alert(
+          'Bu mahsulot bazada bor',
+          `${p.name}\n${money(p.sale_price)} so'm · qoldiq ${p.stock} ${p.unit}`,
+          [
+            { text: 'Baribir yangi qo\'shish', style: 'cancel' },
+            { text: 'Ochish', onPress: () => router.replace(`/product/${p.id}`) },
+          ],
+        );
+      }
+    } catch {
+      // Tekshiruv ishlamasa ham kod formaga yozildi — davom etaveradi.
+    }
+  }
+
+  /* -------------------------------- Rasm -------------------------------- */
 
   /** Rasmni AI ga yuborib, maydonlarni to'ldiradi. */
   async function recognize(base64: string, uri: string) {
@@ -65,7 +162,7 @@ export default function NewProductScreen() {
 
   async function snap() {
     const photo = await cameraRef.current?.takePictureAsync({ base64: true, quality: 0.6 });
-    setCameraOpen(false);
+    setCamMode('off');
     if (photo?.base64 && photo.uri) await recognize(photo.base64, photo.uri);
   }
 
@@ -78,18 +175,39 @@ export default function NewProductScreen() {
     }
   }
 
-  async function openCamera() {
+  async function openCamera(mode: 'photo' | 'barcode') {
     if (!permission?.granted) {
       const r = await requestPermission();
       if (!r.granted) {
-        Alert.alert('Ruxsat kerak', 'Kameraga ruxsat bermasangiz rasmga ololmaymiz.');
+        Alert.alert('Ruxsat kerak', 'Kameraga ruxsat bermasangiz skanerlab bo\'lmaydi.');
         return;
       }
     }
-    setCameraOpen(true);
+    scanLock.current = false;
+    setCamMode(mode);
   }
 
-  async function save() {
+  /* ------------------------------- Saqlash ------------------------------- */
+
+  /**
+   * Formani keyingi mahsulotga tayyorlaydi.
+   * Birlik, kategoriya va chegara qoladi: bir partiyadagi mahsulotlar
+   * odatda bir xil bo'ladi, ularni qayta tanlash ortiqcha ish.
+   */
+  function resetForNext() {
+    setName('');
+    setCostPrice('');
+    setSalePrice('');
+    setStock('');
+    setBarcode('');
+    setPhotoUri(null);
+    setVision(null);
+    setSaleTouched(false);
+    scrollRef.current?.scrollTo({ y: 0, animated: true });
+    nameRef.current?.focus();
+  }
+
+  async function save(andNext: boolean) {
     if (!name.trim()) {
       Alert.alert('Nom kerak', 'Mahsulot nomini kiriting.');
       return;
@@ -114,7 +232,7 @@ export default function NewProductScreen() {
         ...(Number(salePrice) <= 0 ? ['Sotuv narxi kiritilmagan'] : []),
         ...(margin < 0 ? ['Sotuv narxi tan narxdan past — zarar bo\'ladi'] : []),
       ],
-      confirmText: 'Qo\'shish',
+      confirmText: andNext ? 'Qo\'shib, davom etish' : 'Qo\'shish',
     });
     if (!ok) return;
 
@@ -140,7 +258,13 @@ export default function NewProductScreen() {
           photo_url: photoUrl,
         },
       });
-      router.back();
+
+      if (andNext) {
+        setLastSaved(name.trim());
+        resetForNext();
+      } else {
+        router.back();
+      }
     } catch (e: any) {
       Alert.alert('Saqlab bo\'lmadi', e.message);
     } finally {
@@ -149,17 +273,40 @@ export default function NewProductScreen() {
   }
 
   /* ------------------------------ Kamera ------------------------------ */
-  if (cameraOpen) {
+  if (camMode !== 'off') {
+    const scanning = camMode === 'barcode';
     return (
       <View style={{ flex: 1, backgroundColor: '#000' }}>
-        <CameraView ref={cameraRef} style={{ flex: 1 }} facing="back" mode="picture" />
+        <CameraView
+          ref={cameraRef}
+          style={{ flex: 1 }}
+          facing="back"
+          mode="picture"
+          barcodeScannerSettings={scanning ? { barcodeTypes: [...BARCODE_TYPES] } : undefined}
+          onBarcodeScanned={scanning ? (r) => {
+            if (scanLock.current) return;
+            scanLock.current = true;
+            setCamMode('off');
+            afterScan(r.data.trim());
+          } : undefined}
+        />
+
+        {scanning && (
+          <View style={s.scanOverlay} pointerEvents="none">
+            <View style={s.scanFrame} />
+            <Text style={s.scanHint}>Shtrix-kodni ramka ichiga tuting</Text>
+          </View>
+        )}
+
         <SafeAreaView style={s.camControls} edges={['bottom']}>
-          <Pressable onPress={() => setCameraOpen(false)} style={s.camCancel}>
+          <Pressable onPress={() => setCamMode('off')} style={s.camCancel}>
             <Text style={{ color: '#fff', fontSize: 16 }}>Bekor</Text>
           </Pressable>
-          <Pressable onPress={snap} style={s.shutter}>
-            <View style={s.shutterInner} />
-          </Pressable>
+          {scanning ? <View style={{ width: 72 }} /> : (
+            <Pressable onPress={snap} style={s.shutter}>
+              <View style={s.shutterInner} />
+            </Pressable>
+          )}
           <View style={{ width: 70 }} />
         </SafeAreaView>
       </View>
@@ -168,6 +315,7 @@ export default function NewProductScreen() {
 
   /* ------------------------------- Forma ------------------------------- */
   const margin = (Number(salePrice) || 0) - (Number(costPrice) || 0);
+  const markupPct = Math.round(defaults.markup * 100);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
@@ -185,7 +333,23 @@ export default function NewProductScreen() {
           <View style={{ width: 44 }} />
         </View>
 
-        <ScrollView contentContainerStyle={s.scroll} keyboardShouldPersistTaps="handled">
+        <ScrollView ref={scrollRef} contentContainerStyle={s.scroll}
+          keyboardShouldPersistTaps="handled">
+
+          {/* Oldingi mahsulot saqlangani haqida qisqa xabar */}
+          {lastSaved && (
+            <View style={s.saved}>
+              <Icon name="mahsulot" size={16} color={colors.success} />
+              <Text style={[font.small, { color: colors.success, flex: 1 }]}>
+                {lastSaved} qo'shildi
+              </Text>
+            </View>
+          )}
+
+          {/* Eng tez yo'l — skaner */}
+          <Button title="Shtrix-kodni skanerlash" icon="shtrix"
+            onPress={() => openCamera('barcode')} />
+
           {/* Rasm */}
           {photoUri ? (
             <View style={s.photoWrap}>
@@ -203,7 +367,8 @@ export default function NewProductScreen() {
             </View>
           ) : (
             <View style={{ flexDirection: 'row', gap: spacing.sm }}>
-              <Button title="Rasmga olish" icon="kamera" onPress={openCamera} style={{ flex: 1 }} />
+              <Button title="Rasmga olish" icon="kamera" variant="secondary"
+                onPress={() => openCamera('photo')} style={{ flex: 1 }} />
               <Button title="Galereya" icon="galereya" variant="secondary"
                 onPress={pickFromGallery} style={{ flex: 1 }} />
             </View>
@@ -245,7 +410,7 @@ export default function NewProductScreen() {
           )}
 
           <Field label="Nomi" placeholder="Masalan: Guruch Lazer 1kg"
-            value={name} onChangeText={setName} />
+            inputRef={nameRef} value={name} onChangeText={setName} />
 
           <View>
             <Text style={[font.small, { color: colors.textMuted, marginBottom: spacing.xs }]}>
@@ -267,8 +432,11 @@ export default function NewProductScreen() {
             <Field label="Tan narxi" placeholder="0" value={costPrice}
               onChangeText={setCostPrice} keyboardType="number-pad" style={{ flex: 1 }} />
             <Field label="Sotuv narxi" placeholder="0" value={salePrice}
-              onChangeText={setSalePrice} keyboardType="number-pad" style={{ flex: 1 }}
-              hint={margin > 0 ? `Foyda: ${money(margin)} so'm` : undefined} />
+              onChangeText={(v) => { setSaleTouched(true); setSalePrice(v); }}
+              keyboardType="number-pad" style={{ flex: 1 }}
+              hint={!saleTouched && Number(salePrice) > 0
+                ? `Taklif: +${markupPct}%`
+                : margin > 0 ? `Foyda: ${money(margin)} so'm` : undefined} />
           </View>
 
           <View style={{ flexDirection: 'row', gap: spacing.sm }}>
@@ -276,18 +444,40 @@ export default function NewProductScreen() {
               onChangeText={(v) => setStock(v.replace(',', '.'))}
               keyboardType="decimal-pad" style={{ flex: 1 }} />
             <Field label="Ogohlantirish chegarasi" placeholder="0" value={minStock}
-              onChangeText={(v) => setMinStock(v.replace(',', '.'))}
+              onChangeText={(v) => { setMinTouched(true); setMinStock(v.replace(',', '.')); }}
               keyboardType="decimal-pad" style={{ flex: 1 }}
               hint="Shundan kam qolsa xabar beradi" />
           </View>
 
-          <Field label="Kategoriya" placeholder="oziq-ovqat"
-            value={category} onChangeText={setCategory} />
-          <Field label="Shtrix-kod" placeholder="ixtiyoriy"
-            value={barcode} onChangeText={setBarcode} keyboardType="number-pad" />
+          <View>
+            <Field label="Kategoriya" placeholder="oziq-ovqat"
+              value={category} onChangeText={setCategory} />
+            {defaults.categories.length > 0 && (
+              <View style={[s.units, { marginTop: spacing.sm }]}>
+                {defaults.categories.map((c) => (
+                  <Pressable key={c} onPress={() => setCategory(c === category ? '' : c)}
+                    style={[s.unitChip, category === c && s.unitChipOn]}>
+                    <Text style={[font.small, {
+                      color: category === c ? '#fff' : colors.textMuted,
+                    }]}>{c}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            )}
+          </View>
 
-          <Button title="Saqlash" onPress={save} loading={saving}
+          <View style={{ flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-end' }}>
+            <Field label="Shtrix-kod" placeholder="ixtiyoriy" style={{ flex: 1 }}
+              value={barcode} onChangeText={setBarcode} keyboardType="number-pad" />
+            <Pressable onPress={() => openCamera('barcode')} style={s.scanBtn}>
+              <Icon name="shtrix" size={22} color={colors.primary} />
+            </Pressable>
+          </View>
+
+          <Button title="Saqlash" onPress={() => save(false)} loading={saving}
             style={{ marginTop: spacing.md }} />
+          <Button title="Saqlab, yana qo'shish" variant="ghost" icon="qoshish"
+            onPress={() => save(true)} disabled={saving} />
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -297,6 +487,11 @@ export default function NewProductScreen() {
 const s = StyleSheet.create({
   head: { flexDirection: 'row', alignItems: 'center', padding: spacing.lg, gap: spacing.md },
   scroll: { padding: spacing.lg, paddingTop: 0, gap: spacing.md, paddingBottom: spacing.xxl },
+  saved: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    backgroundColor: colors.successSoft, borderRadius: radius.sm,
+    paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
+  },
   photoWrap: { height: 200, borderRadius: radius.lg, overflow: 'hidden', ...shadow },
   photo: { width: '100%', height: '100%' },
   photoOverlay: {
@@ -324,6 +519,20 @@ const s = StyleSheet.create({
     borderRadius: radius.pill, backgroundColor: colors.surfaceAlt,
   },
   unitChipOn: { backgroundColor: colors.primary },
+  scanBtn: {
+    width: 52, height: 52, borderRadius: radius.md,
+    borderWidth: 1, borderColor: colors.border,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  scanOverlay: {
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+    alignItems: 'center', justifyContent: 'center', gap: spacing.lg,
+  },
+  scanFrame: {
+    width: '78%', height: 170, borderRadius: radius.lg,
+    borderWidth: 2, borderColor: 'rgba(255,255,255,0.9)',
+  },
+  scanHint: { color: '#fff', fontSize: 15 },
   camControls: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
