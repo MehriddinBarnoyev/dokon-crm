@@ -1,0 +1,253 @@
+"""Do'kon CRM — API uchdan-uchgacha sinovi (AI'siz qismlar)."""
+import json, urllib.parse, urllib.request, ssl, sys, time
+
+# Har yurishda noyob mijoz ismi — sinov qayta-qayta ishlashi uchun
+MIJOZ = f"Sinov Mijoz {int(time.time())}"
+
+import os
+# HTTPS yoqilgan bo'lsa o'z CA imiz bilan tekshiramiz (-k ishlatmaymiz:
+# sertifikat haqiqatan to'g'ri ekanini sinov ham tasdiqlashi kerak).
+CA = os.environ.get("API_CA", "certs/ca.crt")
+
+
+def _detect_url() -> str:
+    """Server HTTPS da ham, HTTP da ham ishlashi mumkin — o'zimiz aniqlaymiz."""
+    import subprocess
+    if os.environ.get("API_URL"):
+        return os.environ["API_URL"]
+    for url in ("https://localhost:3000", "http://localhost:3000"):
+        args = ["curl", "-s", "-o", "/dev/null", "-w", "%{http_code}",
+                "--max-time", "4", f"{url}/health"]
+        if url.startswith("https") and os.path.exists(CA):
+            args += ["--cacert", CA]
+        if subprocess.run(args, capture_output=True, text=True).stdout.strip() == "200":
+            return url
+    return "http://localhost:3000"
+
+
+B = _detect_url()
+CURL_TLS = ["--cacert", CA] if B.startswith("https") and os.path.exists(CA) else []
+TOKEN = None
+fails = []
+
+# HTTPS bo'lsa o'z CA imizni yuklaymiz — tekshiruvni o'chirib qo'ymaymiz,
+# aks holda sertifikat noto'g'ri bo'lsa ham sinov o'tib ketardi.
+SSL_CTX = None
+if B.startswith("https"):
+    SSL_CTX = ssl.create_default_context()
+    if os.path.exists(CA):
+        SSL_CTX.load_verify_locations(CA)
+
+
+def call(path, method="GET", body=None):
+    req = urllib.request.Request(f"{B}{path}", method=method)
+    # Mobil klient kabi: Content-Type faqat tana bo'lganda yuboriladi
+    if body is not None:
+        req.add_header("Content-Type", "application/json")
+    if TOKEN:
+        req.add_header("Authorization", f"Bearer {TOKEN}")
+    data = json.dumps(body).encode() if body is not None else None
+    try:
+        with urllib.request.urlopen(req, data, context=SSL_CTX) as r:
+            return json.loads(r.read() or "null"), r.status
+    except urllib.error.HTTPError as e:
+        return json.loads(e.read() or "null"), e.code
+
+def check(name, cond, detail=""):
+    mark = "OK " if cond else "XATO"
+    print(f"  [{mark}] {name}" + (f"  — {detail}" if detail else ""))
+    if not cond:
+        fails.append(name)
+
+# --- Kirish ---
+print("\n1. Autentifikatsiya")
+res, st = call("/auth/login", "POST", {"phone": "+998901234567", "password": "1234"})
+check("login", st == 200 and "token" in res)
+TOKEN = res["token"]
+
+res, st = call("/auth/login", "POST", {"phone": "+998901234567", "password": "notogri"})
+check("noto'g'ri parol rad etiladi", st == 401)
+
+me, _ = call("/auth/me")
+check("/auth/me do'konni qaytaradi", me.get("shop", {}).get("name") == "Baraka Do'koni")
+
+# --- Savdo ombordan ayiradi ---
+print("\n2. Savdo → ombor kamayadi, kirim ortadi")
+prods, _ = call("/products?search=Kartoshka")
+p = prods[0]
+stock0 = float(p["stock"])
+dash0, _ = call("/reports/dashboard")
+cash0 = float(dash0["today"]["cash_in"])
+
+res, st = call("/sales", "POST", {
+    "items": [{"product_id": p["id"], "name": p["name"], "unit": p["unit"],
+               "qty": 3, "unit_price": p["sale_price"]}],
+    "payment_method": "naqd"})
+check("savdo yozildi", st == 200, res.get("summary", ""))
+sale_id = res.get("id")
+
+p2, _ = call(f"/products/{p['id']}")
+stock1 = float(p2["stock"])
+check("qoldiq 3 ga kamaydi", abs((stock0 - stock1) - 3) < 1e-9, f"{stock0} → {stock1}")
+check("ombor harakati yozildi",
+      p2["moves"][0]["ref_type"] == "sale" and float(p2["moves"][0]["qty"]) == 3)
+
+dash1, _ = call("/reports/dashboard")
+cash1 = float(dash1["today"]["cash_in"])
+expected = 3 * float(p["sale_price"])
+check("kunlik kirim o'sdi", abs((cash1 - cash0) - expected) < 1e-6,
+      f"+{cash1 - cash0:.0f} so'm")
+
+# --- Savdoni bekor qilish qoldiqni qaytaradi ---
+print("\n3. Savdoni bekor qilish")
+res, st = call(f"/sales/{sale_id}", "DELETE")
+check("bekor qilindi", st == 200)
+p3, _ = call(f"/products/{p['id']}")
+check("qoldiq qaytdi", abs(float(p3["stock"]) - stock0) < 1e-9,
+      f"{stock1} → {p3['stock']}")
+
+# --- Qarzga savdo ---
+print("\n4. Qarzga savdo → qarz daftariga tushadi")
+res, st = call("/sales", "POST", {
+    "items": [{"product_id": p["id"], "name": p["name"], "unit": p["unit"],
+               "qty": 2, "unit_price": 10000}],
+    "customer_name": MIJOZ, "payment_method": "qarz", "paid": 0})
+check("qarzga savdo yozildi", st == 200, res.get("summary", ""))
+
+debtors, _ = call("/debts?only_owing=1")
+sinov = [d for d in debtors if d["name"] == MIJOZ]
+check("yangi mijoz qarzdorlar ro'yxatida", len(sinov) == 1)
+check("qarz summasi to'g'ri", float(sinov[0]["balance"]) == 20000,
+      f"{sinov[0]['balance']} so'm")
+
+# --- Qarz to'lovi ---
+print("\n5. Qarz to'lovi")
+res, st = call("/debts/payment", "POST", {
+    "customer_id": sinov[0]["customer_id"], "customer_name": MIJOZ,
+    "amount": 15000})
+check("to'lov yozildi", st == 200, res.get("summary", ""))
+det, _ = call(f"/debts/customer/{sinov[0]['customer_id']}")
+check("balans kamaydi", float(det["balance"]) == 5000, f"{det['balance']} so'm")
+
+# --- Omborga kirim ---
+print("\n6. Omborga kirim")
+before = float(call(f"/products/{p['id']}")[0]["stock"])
+res, st = call("/sales/purchase", "POST", {
+    "supplier": "Sinov Optom",
+    "items": [{"product_id": p["id"], "name": p["name"], "unit": p["unit"],
+               "qty": 25, "cost_price": 4200}]})
+check("kirim yozildi", st == 200, res.get("summary", ""))
+after = float(call(f"/products/{p['id']}")[0]["stock"])
+check("qoldiq 25 ga oshdi", abs((after - before) - 25) < 1e-9, f"{before} → {after}")
+check("tan narx yangilandi", float(call(f"/products/{p['id']}")[0]["cost_price"]) == 4200)
+
+# --- Chiqim ---
+print("\n7. Chiqim")
+e0 = float(call("/reports/dashboard")[0]["today"]["expense_total"])
+res, st = call("/sales/expense", "POST", {"category": "transport", "amount": 45000})
+check("chiqim yozildi", st == 200, res.get("summary", ""))
+e1 = float(call("/reports/dashboard")[0]["today"]["expense_total"])
+check("kunlik chiqim o'sdi", abs((e1 - e0) - 45000) < 1e-6, f"+{e1 - e0:.0f} so'm")
+
+# --- Qoldiq tuzatish ---
+print("\n8. Qoldiq tuzatish (inventarizatsiya)")
+res, st = call(f"/products/{p['id']}/adjust", "POST", {"new_stock": 77, "note": "sinov"})
+check("tuzatildi", st == 200, res.get("summary", ""))
+check("qoldiq aynan 77", float(call(f"/products/{p['id']}")[0]["stock"]) == 77)
+
+# --- Hisobotlar ---
+print("\n9. Hisobotlar")
+daily, st = call("/reports/daily?days=7")
+check("kunlik hisobot", st == 200 and len(daily) > 0, f"{len(daily)} kun")
+top, st = call("/reports/top-products?days=30")
+check("top mahsulotlar", st == 200 and len(top) > 0, f"{len(top)} ta")
+inv, st = call("/reports/inventory-value")
+check("ombor qiymati", st == 200 and float(inv["cost_value"]) > 0,
+      f"{float(inv['cost_value']):,.0f} so'm")
+
+# --- Mijozli savdo (naqd bo'lsa ham) ---
+print("\n9b. Mijozga bog'langan savdo")
+MIJOZ2 = MIJOZ + " naqd"
+prods2, _ = call("/products?limit=5")
+p2 = prods2[0]
+res, st = call("/sales", "POST", {
+    "items": [{"product_id": p2["id"], "name": p2["name"], "unit": p2["unit"],
+               "qty": 1, "unit_price": 7000}],
+    "customer_name": MIJOZ2, "payment_method": "naqd"})
+check("naqd savdo mijoz bilan yozildi", st == 200, res.get("summary", ""))
+
+# Bir nechta har xil mahsulot — bitta savdoda
+res, st = call("/sales", "POST", {
+    "items": [
+        {"product_id": prods2[0]["id"], "name": prods2[0]["name"],
+         "unit": prods2[0]["unit"], "qty": 2, "unit_price": 5000},
+        {"product_id": prods2[1]["id"], "name": prods2[1]["name"],
+         "unit": prods2[1]["unit"], "qty": 1, "unit_price": 12000},
+        {"product_id": prods2[2]["id"], "name": prods2[2]["name"],
+         "unit": prods2[2]["unit"], "qty": 3, "unit_price": 4000},
+    ],
+    "customer_name": MIJOZ2, "payment_method": "naqd"})
+check("ko'p turdagi mahsulot bitta savdoda", st == 200, res.get("summary", "")[:80])
+
+mijozlar, _ = call("/debts?only_owing=0&search=" + urllib.parse.quote(MIJOZ2))
+topilgan = [c for c in mijozlar if c["name"] == MIJOZ2]
+check("mijoz ro'yxatda ko'rinadi", len(topilgan) == 1)
+
+if topilgan:
+    det, _ = call(f"/debts/customer/{topilgan[0]['customer_id']}")
+    check("xaridlar tarixi yozildi", det["jami"]["xaridlar_soni"] == 2,
+          f"{det['jami']['xaridlar_soni']} ta xarid")
+    check("xarid summasi to'g'ri",
+          abs(float(det["jami"]["jami_xarid"]) - (7000 + 10000 + 12000 + 12000)) < 1,
+          f"{float(det['jami']['jami_xarid']):,.0f} so'm")
+    check("naqd xaridda qarz yo'q", float(det["balance"]) == 0,
+          f"balans {det['balance']}")
+
+# --- Aqlli qidiruv ---
+print("\n10. Aqlli qidiruv (xato yozilgan / ko'p so'zli nomlar)")
+QIDIRUV = [
+    ("piez",       "Piyoz",             "harf tushib qolgan"),
+    ("kartoska",   "Kartoshka",         "sh → s"),
+    ("sakar",      "Shakar",            "sh → s"),
+    ("makron",     "Makaron 500g",      "harf tushib qolgan"),
+    ("tuxm",       "Tuxum",             "harf tushib qolgan"),
+    ("kola",       "Coca-Cola 1.5L",    "so'z ichida + c/k"),
+    ("coca cola",  "Coca-Cola 1.5L",    "defis o'rniga bo'sh joy"),
+    ("osimlik",    "O'simlik yog'i 1L", "apostrofsiz"),
+    ("lazer",      "Guruch Lazer 1kg",  "faqat ikkinchi so'z"),
+    ("ahmad",      "Choy Ahmad 100g",   "faqat ikkinchi so'z"),
+    ("kir kukuni", "Kir yuvish kukuni", "o'rtadagi so'z tashlangan"),
+    ("пиёз",       "Piyoz",             "kirill alifbo"),
+]
+for q, kutilgan, sabab in QIDIRUV:
+    rows, st = call(f"/products?search={urllib.parse.quote(q)}")
+    topildi = rows[0]["name"] if st == 200 and rows else "—"
+    check(f'"{q}" → {kutilgan}', topildi == kutilgan, f"{sabab}; topildi: {topildi}")
+
+# Mos kelmaydigan so'rov bo'sh natija berishi kerak
+rows, _ = call("/products?search=" + urllib.parse.quote("televizor"))
+check("mos kelmaydigan so'rov bo'sh qaytaradi", len(rows) == 0, f"{len(rows)} ta")
+
+# --- Himoya ---
+print("\n11. Xavfsizlik")
+saved = TOKEN; TOKEN = None
+_, st = call("/products")
+check("tokensiz kirish rad etiladi", st == 401)
+TOKEN = saved
+
+_, st = call("/sales", "POST", {"items": [], "payment_method": "naqd"})
+check("bo'sh savat rad etiladi", st == 400)
+
+# AI marshruti: kalit bo'lsa 200/502, bo'lmasa 503 — ikkalasi ham to'g'ri javob
+health, _ = call("/health")
+_, st = call("/ai/command", "POST", {"text": "salom"})
+if health.get("ai"):
+    check("AI yoqilgan, marshrut javob beradi", st in (200, 502), f"HTTP {st}")
+else:
+    check("AI kalitsiz 503 qaytaradi", st == 503)
+
+print("\n" + "=" * 46)
+if fails:
+    print(f"XATOLAR ({len(fails)}): " + ", ".join(fails))
+    sys.exit(1)
+print("HAMMA SINOV O'TDI")

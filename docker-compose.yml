@@ -1,0 +1,25 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: dokon-db
+    restart: unless-stopped
+    # Host tarmog'i: bu mashinada docker-proxy ishlamagani uchun port
+    # mapping o'rniga to'g'ridan-to'g'ri host portiga bog'lanamiz.
+    # Mahalliy Postgres 5432 da turgani uchun biz 5433 ni olamiz.
+    network_mode: host
+    environment:
+      POSTGRES_USER: dokon
+      POSTGRES_PASSWORD: dokon_secret
+      POSTGRES_DB: dokon
+      PGPORT: "5433"
+      TZ: Asia/Tashkent
+    volumes:
+      - dokon_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dokon -d dokon -p 5433"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  dokon_pgdata:

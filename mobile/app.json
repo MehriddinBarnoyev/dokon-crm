@@ -1,0 +1,54 @@
+{
+  "expo": {
+    "name": "Do'kon CRM",
+    "slug": "dokon-crm",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "uz.dokoncrm.app",
+      "infoPlist": {
+        "NSAppTransportSecurity": {
+          "NSAllowsLocalNetworking": true
+        }
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "edgeToEdgeEnabled": true,
+      "package": "uz.dokoncrm.app"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-image",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Mahsulotni rasmga olish uchun kameraga ruxsat bering."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Mahsulot rasmini galereyadan tanlash uchun ruxsat bering.",
+          "cameraPermission": "Mahsulotni rasmga olish uchun kameraga ruxsat bering."
+        }
+      ]
+    ],
+    "scheme": "dokoncrm",
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
