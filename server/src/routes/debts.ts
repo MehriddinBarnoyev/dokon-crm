@@ -73,6 +73,8 @@ export default async function debtRoutes(app: FastifyInstance) {
       customer_phone: z.string().nullable().default(null),
       amount: z.number().positive(),
       due_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().default(null),
+      /** Eski daftardan ko'chirilayotgan qarz uchun — berilgan sana. */
+      created_at: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().default(null),
       note: z.string().nullable().default(null),
     }).parse(req.body);
 

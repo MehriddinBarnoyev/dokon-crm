@@ -109,7 +109,7 @@ export default async function saleRoutes(app: FastifyInstance) {
 
   app.get('/expense', async (req) => {
     const q = z.object({ from: z.string().optional(), to: z.string().optional() }).parse(req.query);
-    const where = ['shop_id = $1'];
+    const where = ['shop_id = $1', 'deleted_at IS NULL'];
     const params: unknown[] = [req.auth.shop_id];
     if (q.from) { params.push(q.from); where.push(`created_at >= $${params.length}::date`); }
     if (q.to)   { params.push(q.to);   where.push(`created_at < ($${params.length}::date + 1)`); }

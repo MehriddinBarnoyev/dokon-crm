@@ -175,11 +175,11 @@ async function main() {
       { type: 'debt', customer_id: customers[0]!.id, customer_name: customers[0]!.name,
         customer_phone: null, amount: 250000,
         due_date: new Date(Date.now() - 3 * 864e5).toISOString().slice(0, 10),  // muddati o'tgan
-        note: 'Naqd qarz' },
+        created_at: null, note: 'Naqd qarz' },
       { type: 'debt', customer_id: customers[1]!.id, customer_name: customers[1]!.name,
         customer_phone: null, amount: 120000,
         due_date: new Date(Date.now() + 7 * 864e5).toISOString().slice(0, 10),
-        note: null },
+        created_at: null, note: null },
     ]);
   });
   console.log('  qarzlar qo\'shildi');

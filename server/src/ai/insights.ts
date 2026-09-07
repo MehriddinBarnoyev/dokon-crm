@@ -67,7 +67,8 @@ export async function collectStats(shopId: string, days = 30) {
     query(
       `SELECT category AS kategoriya, SUM(amount) AS summa
          FROM expenses
-        WHERE shop_id = $1 AND created_at > now() - ($2::int || ' days')::interval
+        WHERE shop_id = $1 AND deleted_at IS NULL
+          AND created_at > now() - ($2::int || ' days')::interval
         GROUP BY 1 ORDER BY summa DESC LIMIT 10`, [shopId, days]),
   ]);
 

@@ -16,6 +16,9 @@ import authRoutes from './routes/auth.js';
 import productRoutes from './routes/products.js';
 import saleRoutes from './routes/sales.js';
 import debtRoutes from './routes/debts.js';
+import expenseRoutes from './routes/expenses.js';
+import syncRoutes from './routes/sync.js';
+import flushRoutes from './routes/flush.js';
 import reportRoutes from './routes/reports.js';
 import aiRoutes from './routes/ai.js';
 
@@ -104,8 +107,11 @@ await app.register(authRoutes, { prefix: '/auth' });
 await app.register(productRoutes, { prefix: '/products' });
 await app.register(saleRoutes, { prefix: '/sales' });
 await app.register(debtRoutes, { prefix: '/debts' });
+await app.register(expenseRoutes, { prefix: '/expenses' });
 await app.register(reportRoutes, { prefix: '/reports' });
 await app.register(aiRoutes, { prefix: '/ai' });
+await app.register(syncRoutes, { prefix: '/sync' });
+await app.register(flushRoutes, { prefix: '/sync' });
 
 try {
   await app.listen({ port: env.port, host: env.host });

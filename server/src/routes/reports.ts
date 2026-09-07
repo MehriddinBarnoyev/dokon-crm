@@ -18,11 +18,14 @@ export default async function reportRoutes(app: FastifyInstance) {
               COALESCE(cash_in,0)     AS cash_in,
               COALESCE(expense_total,0) AS expense_total,
               COALESCE(net_profit,0)  AS net_profit,
-              COALESCE(sales_count,0) AS sales_count
+              COALESCE(sales_count,0) AS sales_count,
+              COALESCE(credit_total,0)  AS credit_total,
+              COALESCE(credit_profit,0) AS credit_profit
          FROM daily_summary
         WHERE shop_id = $1
           AND day = (now() AT TIME ZONE 'Asia/Tashkent')::date`, [shop])
-      ?? { sales_total: 0, cash_in: 0, expense_total: 0, net_profit: 0, sales_count: 0 };
+      ?? { sales_total: 0, cash_in: 0, expense_total: 0, net_profit: 0,
+           sales_count: 0, credit_total: 0, credit_profit: 0 };
 
     const [debts, lowStock, week] = await Promise.all([
       one(`SELECT COALESCE(SUM(balance),0) AS total_owed,
@@ -32,7 +35,7 @@ export default async function reportRoutes(app: FastifyInstance) {
       query(`SELECT id, name, stock, min_stock, unit FROM products
               WHERE shop_id = $1 AND is_active AND stock <= min_stock
               ORDER BY (stock - min_stock) LIMIT 10`, [shop]),
-      query(`SELECT day, sales_total, expense_total, net_profit
+      query(`SELECT day, sales_total, expense_total, net_profit, credit_profit
                FROM daily_summary
               WHERE shop_id = $1
                 AND day > (now() AT TIME ZONE 'Asia/Tashkent')::date - 7
@@ -86,7 +89,9 @@ export default async function reportRoutes(app: FastifyInstance) {
                   COALESCE(cash_in,0)       AS cash_in,
                   COALESCE(expense_total,0) AS expense_total,
                   COALESCE(net_profit,0)    AS net_profit,
-                  COALESCE(sales_count,0)   AS sales_count
+                  COALESCE(sales_count,0)   AS sales_count,
+                  COALESCE(credit_total,0)  AS credit_total,
+                  COALESCE(credit_profit,0) AS credit_profit
              FROM daily_summary WHERE shop_id = $2 AND day = $1::date`, [date, shop]),
 
       query(`SELECT s.id, s.total, s.paid, s.cost_total, s.payment_method,
@@ -105,6 +110,7 @@ export default async function reportRoutes(app: FastifyInstance) {
       query(`SELECT id, category, amount, note, created_at
                FROM expenses
               WHERE shop_id = $2
+                AND deleted_at IS NULL
                 AND created_at >= ${bounds}
                 AND created_at < ((($1::date + 1))::timestamp AT TIME ZONE 'Asia/Tashkent')
               ORDER BY created_at DESC`, [date, shop]),
@@ -120,7 +126,8 @@ export default async function reportRoutes(app: FastifyInstance) {
     return {
       day: date,
       summary: summary ?? {
-        sales_total: 0, cash_in: 0, expense_total: 0, net_profit: 0, sales_count: 0,
+        sales_total: 0, cash_in: 0, expense_total: 0, net_profit: 0,
+        sales_count: 0, credit_total: 0, credit_profit: 0,
       },
       sales, expenses, debts,
     };

@@ -71,6 +71,9 @@ CREATE TABLE IF NOT EXISTS products (
 );
 CREATE INDEX IF NOT EXISTS products_shop_idx    ON products(shop_id) WHERE is_active;
 CREATE INDEX IF NOT EXISTS products_barcode_idx ON products(shop_id, barcode);
+-- Delta-sync uchun. `products_shop_idx` qisman (WHERE is_active), shuning
+-- uchun arxivlanganlarni ham qamrashi kerak bo'lgan sync so'roviga yaramaydi.
+CREATE INDEX IF NOT EXISTS products_shop_updated_idx ON products(shop_id, updated_at);
 -- Nomi bo'yicha tez va "xato yozilgan" qidiruv uchun (piyoz / piyoz. / Piyoz)
 CREATE INDEX IF NOT EXISTS products_name_trgm   ON products USING gin (lower(name) gin_trgm_ops);
 
@@ -183,9 +186,42 @@ CREATE TABLE IF NOT EXISTS expenses (
   amount     numeric(14,2) NOT NULL CHECK (amount > 0),
   note       text,
   source     text NOT NULL DEFAULT 'manual',
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  -- Yumshoq o'chirish. Chiqimda stock_moves kabi jurnal yo'q, shuning uchun
+  -- qattiq DELETE qaytarib bo'lmasdi. Ayni vaqtda bu ustun mijoz cache'i
+  -- uchun "tombstone" vazifasini ham bajaradi.
+  deleted_at timestamptz
+);
+-- Mavjud bazalar uchun (CREATE TABLE yuqorida IF NOT EXISTS bilan o'tkazib
+-- yuboriladi, shuning uchun yangi ustunlar alohida qo'shiladi).
+ALTER TABLE expenses ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
+ALTER TABLE expenses ADD COLUMN IF NOT EXISTS deleted_at timestamptz;
+CREATE INDEX IF NOT EXISTS expenses_shop_date_idx ON expenses(shop_id, created_at DESC);
+
+-- ---------- Mutatsiya jurnali (offline navbat uchun) ----------
+--
+-- MUAMMO: internet yo'q bo'lganda ilova savdoni navbatga qo'yadi va keyin
+-- yuboradi. Yuborish yarim yo'lda uzilsa (server yozdi, javob yetib
+-- kelmadi) mijoz qayta urinadi — va savdo IKKI MARTA yoziladi, qoldiq
+-- ikki marta kamayadi.
+--
+-- YECHIM: mijoz har bir o'zgarishga o'zi uuid beradi. Server uni shu
+-- jadvalga yozadi; ikkinchi marta kelganda amal qayta bajarilmaydi,
+-- saqlangan natija qaytariladi.
+--
+-- Jadval o'sib boradi (bir yozuv ~200 bayt). Kerak bo'lsa eskilarini
+-- vaqti-vaqti bilan tozalash mumkin — mijoz bir necha kundan keyin
+-- baribir qayta yubormaydi.
+CREATE TABLE IF NOT EXISTS mutation_log (
+  client_mutation_id uuid PRIMARY KEY,
+  shop_id    uuid NOT NULL REFERENCES shops(id) ON DELETE CASCADE,
+  user_id    uuid REFERENCES users(id) ON DELETE SET NULL,
+  kind       text NOT NULL,
+  result     jsonb NOT NULL DEFAULT '{}'::jsonb,
   created_at timestamptz NOT NULL DEFAULT now()
 );
-CREATE INDEX IF NOT EXISTS expenses_shop_date_idx ON expenses(shop_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS mutation_log_shop_idx ON mutation_log(shop_id, created_at DESC);
 
 -- ---------- AI jurnali ----------
 CREATE TABLE IF NOT EXISTS ai_logs (
@@ -218,16 +254,34 @@ LEFT JOIN debts d ON d.customer_id = c.id
 GROUP BY c.id, c.shop_id, c.name, c.phone;
 
 -- Kunlik kirim / chiqim / foyda
+--
+-- FOYDA QACHON YOZILADI? Savdo BO'LGAN kuni — mijoz pulni keyin bersa ham.
+-- Bu jahon amaliyotidagi asosiy qoida (accrual): daromad mol qo'ldan
+-- chiqqanda tan olinadi, pul kelganda emas. Aks holda "qarzga sotgan kun"
+-- foydasiz ko'rinardi va o'sha foyda mijoz to'lagan kunga sakrab, qaysi
+-- mahsulot qancha foyda keltirgani umuman bilinmay qolardi.
+--
+-- Lekin do'konchiga bitta raqamning o'zi kam: "foyda bor, pul yo'q" holati
+-- eng ko'p uchraydigan tuzoq. Shuning uchun yonida `credit_total` va
+-- `credit_profit` ham chiqadi — o'sha foydaning qancha qismi hali qog'ozda,
+-- ya'ni odamlarning cho'ntagida turgani.
 CREATE OR REPLACE VIEW daily_summary AS
 WITH s AS (
   SELECT shop_id, (created_at AT TIME ZONE 'Asia/Tashkent')::date AS d,
          SUM(total) AS sales_total, SUM(paid) AS cash_in,
-         SUM(total - cost_total) AS gross_profit, COUNT(*) AS sales_count
+         SUM(total - cost_total) AS gross_profit, COUNT(*) AS sales_count,
+         -- O'sha kuni sotilgan, lekin puli olinmagan qism
+         SUM(GREATEST(total - paid, 0)) AS credit_total,
+         -- Qarzda qolgan ULUSHga to'g'ri keladigan foyda.
+         -- Yarmi to'langan savdoning foydasi ham yarmi qarzda hisoblanadi.
+         ROUND(SUM((total - cost_total)
+                   * CASE WHEN total > 0 THEN GREATEST(total - paid, 0) / total
+                          ELSE 0 END), 2) AS credit_profit
   FROM sales GROUP BY 1, 2
 ), e AS (
   SELECT shop_id, (created_at AT TIME ZONE 'Asia/Tashkent')::date AS d,
          SUM(amount) AS expense_total
-  FROM expenses GROUP BY 1, 2
+  FROM expenses WHERE deleted_at IS NULL GROUP BY 1, 2
 ), p AS (
   SELECT shop_id, (created_at AT TIME ZONE 'Asia/Tashkent')::date AS d,
          SUM(-amount) AS debt_paid          -- to'langan qarz = kirim
@@ -239,7 +293,9 @@ SELECT COALESCE(s.shop_id, e.shop_id, p.shop_id) AS shop_id,
        COALESCE(s.cash_in, 0) + COALESCE(p.debt_paid, 0) AS cash_in,
        COALESCE(e.expense_total, 0)              AS expense_total,
        COALESCE(s.gross_profit, 0) - COALESCE(e.expense_total, 0) AS net_profit,
-       COALESCE(s.sales_count, 0)                AS sales_count
+       COALESCE(s.sales_count, 0)                AS sales_count,
+       COALESCE(s.credit_total, 0)               AS credit_total,
+       COALESCE(s.credit_profit, 0)              AS credit_profit
 FROM s FULL JOIN e ON s.shop_id = e.shop_id AND s.d = e.d
        FULL JOIN p ON COALESCE(s.shop_id, e.shop_id) = p.shop_id
                   AND COALESCE(s.d, e.d) = p.d;

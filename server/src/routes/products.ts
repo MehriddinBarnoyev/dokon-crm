@@ -18,7 +18,11 @@ export default async function productRoutes(app: FastifyInstance) {
     const q = z.object({
       search: z.string().optional(),
       low: z.string().optional(),                 // eski mijozlar uchun qoldirilgan
-      status: z.enum(['hammasi', 'tugayapti', 'tugagan', 'bor']).default('hammasi'),
+      // 'tannarxsiz' — tan narxi kiritilmagan mahsulotlar. Ular hisobotni
+      // jimgina buzadi: foyda = sotuv − tan narx bo'lgani uchun bunday
+      // mahsulotning har bir savdosi to'liq foyda bo'lib chiqadi.
+      status: z.enum(['hammasi', 'tugayapti', 'tugagan', 'bor', 'tannarxsiz'])
+        .default('hammasi'),
       category: z.string().optional(),
       unit: UnitSchema.optional(),
       sort: z.enum(['nom', 'arzon', 'qimmat', 'kam_qoldiq', 'kop_qoldiq', 'yangi'])
@@ -34,6 +38,7 @@ export default async function productRoutes(app: FastifyInstance) {
       if (q.status === 'tugagan') return stock <= 0;
       if (q.status === 'tugayapti') return stock > 0 && stock <= min;
       if (q.status === 'bor') return stock > 0;
+      if (q.status === 'tannarxsiz') return Number(row.cost_price) <= 0;
       return true;
     };
 
@@ -61,8 +66,9 @@ export default async function productRoutes(app: FastifyInstance) {
       where.push(q.status === 'tugayapti'
         ? 'p.stock > 0 AND p.stock <= p.min_stock'
         : 'p.stock <= p.min_stock');
-    } else if (q.status === 'tugagan') where.push('p.stock <= 0');
-    else if (q.status === 'bor')      where.push('p.stock > 0');
+    } else if (q.status === 'tugagan')    where.push('p.stock <= 0');
+    else if (q.status === 'bor')         where.push('p.stock > 0');
+    else if (q.status === 'tannarxsiz')  where.push('p.cost_price <= 0');
 
     if (q.category) { params.push(q.category); where.push(`c.name = $${params.length}`); }
     if (q.unit)     { params.push(q.unit);     where.push(`p.unit = $${params.length}`); }
@@ -120,7 +126,13 @@ export default async function productRoutes(app: FastifyInstance) {
       [{ type: 'create_product', ...body }]));
 
     if (body.min_stock > 0) {
-      await query(`UPDATE products SET min_stock = $1 WHERE id = $2`, [body.min_stock, res.id]);
+      // `updated_at` va `shop_id` shart: birinchisisiz delta-sync bu
+      // o'zgarishni ko'rmaydi, ikkinchisisiz begona do'kon qatoriga
+      // yozib yuborish mumkin.
+      await query(
+        `UPDATE products SET min_stock = $1, updated_at = now()
+          WHERE id = $2 AND shop_id = $3`,
+        [body.min_stock, res.id, req.auth.shop_id]);
     }
     return one(`SELECT * FROM products WHERE id = $1`, [res.id]);
   });
@@ -278,7 +290,8 @@ export default async function productRoutes(app: FastifyInstance) {
       one(`SELECT COUNT(*)::int AS hammasi,
                   COUNT(*) FILTER (WHERE stock > 0)::int AS bor,
                   COUNT(*) FILTER (WHERE stock > 0 AND stock <= min_stock)::int AS tugayapti,
-                  COUNT(*) FILTER (WHERE stock <= 0)::int AS tugagan
+                  COUNT(*) FILTER (WHERE stock <= 0)::int AS tugagan,
+                  COUNT(*) FILTER (WHERE cost_price <= 0)::int AS tannarxsiz
              FROM products WHERE shop_id = $1 AND is_active`, [shop]),
     ]);
     return { categories, units, counts };

@@ -69,6 +69,16 @@ export const ActionSchema = z.discriminatedUnion('type', [
     customer_phone: z.string().nullable().default(null),
     amount: money.refine((v) => v > 0, 'summa noldan katta bo\'lishi kerak'),
     due_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().default(null),
+    /**
+     * Qarz QACHON berilgan. Odatda bo'sh — o'shanda hozirgi vaqt yoziladi.
+     *
+     * Do'konchi eski qog'oz daftaridagi qarzlarni ilovaga ko'chirayotganda
+     * kerak bo'ladi: "Alisher 3-avgustda 200 ming olgan" degani bugungi
+     * qarz emas. Sana muddat hisobiga va tarix tartibiga ta'sir qiladi,
+     * kunlik tushum/foydaga esa YO'Q — musbat qarz `daily_summary` ga
+     * umuman kirmaydi (faqat to'lov, ya'ni manfiy yozuv kiradi).
+     */
+    created_at: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().default(null),
     note: z.string().nullable().default(null),
   }),
 
@@ -324,8 +334,14 @@ export async function executeActions(
             `UPDATE products SET cost_price = $1, updated_at = now() WHERE id = $2`,
             [item.cost_price, productId], c);
           if (item.sale_price) {
-            await query(`UPDATE products SET sale_price = $1 WHERE id = $2`,
-              [item.sale_price, productId], c);
+            // `updated_at` shart: mijoz cache'i delta-sync'da shu ustunga
+            // qarab o'zgarishni ko'radi. Yuqoridagi tan narx yangilanishi
+            // uni tasodifan bir satr oldin qo'yib ketadi, lekin bunga
+            // tayanib bo'lmaydi.
+            await query(
+              `UPDATE products SET sale_price = $1, updated_at = now()
+                WHERE id = $2 AND shop_id = $3`,
+              [item.sale_price, productId, ctx.shopId], c);
           }
         }
 
@@ -345,10 +361,15 @@ export async function executeActions(
           c, ctx.shopId, a.customer_id, a.customer_name, a.customer_phone);
         if (!customer) throw new Error('Mijozni aniqlab bo\'lmadi.');
 
+        // Sana Toshkent yarim tunida yoziladi — aks holda UTC'ga o'tganda
+        // kun bir kunga orqaga surilib ko'rinardi.
         const row = await one<{ id: string }>(
-          `INSERT INTO debts (shop_id, customer_id, amount, due_date, note, user_id, source)
-           VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
-          [ctx.shopId, customer.id, a.amount, a.due_date, a.note, ctx.userId, ctx.source], c);
+          `INSERT INTO debts (shop_id, customer_id, amount, due_date, note, user_id, source, created_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,
+                   COALESCE(($8::date)::timestamp AT TIME ZONE 'Asia/Tashkent', now()))
+           RETURNING id`,
+          [ctx.shopId, customer.id, a.amount, a.due_date, a.note, ctx.userId, ctx.source,
+           a.created_at], c);
 
         out.push({
           type: 'debt', id: row!.id, warnings: [],
