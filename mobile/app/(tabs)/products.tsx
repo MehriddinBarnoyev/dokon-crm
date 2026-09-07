@@ -1,56 +1,61 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  FlatList, Pressable, StyleSheet, Text, TextInput, View, RefreshControl,
-} from 'react-native';
+import { FlatList, StyleSheet, Text, TextInput, View, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { Image } from 'expo-image';
-import { api } from '../../src/api/client';
 import type { Product } from '../../src/api/types';
-import { Badge, Empty, Loading } from '../../src/components/ui';
+import * as productStore from '../../src/data/products';
+import { Badge, Chip, Empty } from '../../src/components/ui';
+import { ScreenHeader } from '../../src/components/ScreenHeader';
+import { SkeletonList } from '../../src/components/Skeleton';
+import { PressScale } from '../../src/components/Press';
 import {
   BOSH_FILTR, FilterSheet, faolFiltrlar,
   type FilterOptions, type Filters,
 } from '../../src/components/FilterSheet';
-import { colors, font, money, qty, radius, shadow, spacing } from '../../src/theme';
+import { colors, elevation, font, money, moneyShort, qty, radius, spacing } from '../../src/theme';
 import { Icon } from '../../src/components/Icon';
 
 export default function ProductsScreen() {
   const router = useRouter();
-  const [items, setItems] = useState<Product[] | null>(null);
   const [search, setSearch] = useState('');
   const [filters, setFilters] = useState<Filters>(BOSH_FILTR);
   const [options, setOptions] = useState<FilterOptions | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
-  const load = useCallback(async (q: string, f: Filters) => {
-    const params = new URLSearchParams({ limit: '300', status: f.status, sort: f.sort });
-    if (q.trim()) params.set('search', q.trim());
-    if (f.category) params.set('category', f.category);
-    if (f.unit) params.set('unit', f.unit);
-    setItems(await api<Product[]>(`/products?${params}`));
+  /**
+   * Butun katalog MAHALLIY cache'dan. Qidiruv, filtr va saralash ham
+   * shu yerda bajariladi.
+   *
+   * Ilgari bu ekran har filtr o'zgarishida va har harfda (300 ms
+   * kechikish bilan) serverga so'rov yuborardi, ustiga fokusda
+   * `/products/meta/filters` ni ham tortardi. Endi ekran ochilganda
+   * so'rov umuman ketmaydi — cache eskirgan bo'lsagina fonda bitta
+   * delta-sync bo'ladi.
+   */
+  const [barchasi, setBarchasi] = useState<Product[] | null>(null);
+
+  const load = useCallback(async () => {
+    const darhol = await productStore.loadAndRefresh(setBarchasi);
+    setBarchasi(darhol);
   }, []);
 
-  useFocusEffect(useCallback(() => {
-    load(search, filters).catch(() => {});
-    api<FilterOptions>('/products/meta/filters').then(setOptions).catch(() => {});
-  }, [load]));
+  useFocusEffect(useCallback(() => { load().catch(() => {}); }, [load]));
 
-  // Qidiruv yoki filtr o'zgarganda qayta yuklaymiz.
-  // Kechikish — har harfda so'rov ketmasligi uchun.
+  // Qidiruv/filtr — hisob-kitob qurilmada, debounce kerak emas.
+  const { items: shown, taxminiy } = useMemo(
+    () => (barchasi ? productStore.filtrla(barchasi, search, filters)
+                    : { items: [] as Product[], taxminiy: false }),
+    [barchasi, search, filters]);
+
+  // Filtr variantlari ham cache'dan hisoblanadi.
   useEffect(() => {
-    const id = setTimeout(() => { load(search, filters).catch(() => {}); }, 300);
-    return () => clearTimeout(id);
-  }, [search, filters, load]);
+    if (barchasi) setOptions(productStore.filterOptions(barchasi));
+  }, [barchasi]);
 
-  // Filtrlash serverda bajariladi — bu yerda qayta filtrlamaymiz,
-  // aks holda ikki joyda ikki xil qoida paydo bo'lardi.
-  const shown = items;
-
-  // Server aniq moslik topmasa, taxminiy variantlarni qaytaradi —
-  // buni do'konchiga aytib qo'yamiz, u xato mahsulotni tanlab qo'ymasin.
-  const taxminiy = Boolean(search.trim() && items?.length && items[0].taxminiy);
+  // `items` — ekranning qolgan qismi shunga tayanadi (null = yuklanmoqda).
+  const items = barchasi ? shown : null;
 
   const totals = useMemo(() => {
     if (!items) return null;
@@ -64,94 +69,138 @@ export default function ProductsScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={['top']}>
-      <View style={s.head}>
-        <View style={s.headRow}>
-          <Text style={[font.h2, { color: colors.text, flex: 1 }]}>Ombor</Text>
-          <Pressable onPress={() => router.push('/product/new')} style={s.plusBtn}>
-            <Icon name="qoshish" size={22} color="#fff" />
-          </Pressable>
+      <ScreenHeader
+        title="Ombor"
+        subtitle={totals
+          ? `${totals.count} ta mahsulot · ${moneyShort(totals.value)} so'mlik tovar`
+          : undefined}
+        action={{
+          icon: 'qoshish', label: "Mahsulot qo'shish",
+          onPress: () => router.push('/product/new'),
+        }}
+      />
+
+      <View style={s.tools}>
+        <View style={s.searchBox}>
+          <Icon name="qidiruv" size={18} color={colors.textFaint} />
+          <TextInput
+            style={s.search}
+            placeholder="Mahsulot qidirish…"
+            placeholderTextColor={colors.textFaint}
+            value={search}
+            onChangeText={setSearch}
+            returnKeyType="search"
+            accessibilityLabel="Mahsulot qidirish"
+          />
+          {search.length > 0 ? (
+            <PressScale
+              accessibilityRole="button"
+              accessibilityLabel="Qidiruvni tozalash"
+              onPress={() => setSearch('')}
+              scale={0.85}
+              hitSlop={10}
+            >
+              <Icon name="yopish" size={17} color={colors.textFaint} />
+            </PressScale>
+          ) : null}
         </View>
 
-        {totals && (
-          <Text style={[font.small, { color: colors.textMuted }]}>
-            {totals.count} ta mahsulot · {money(totals.value)} so'mlik tovar
-          </Text>
-        )}
-
-        <TextInput
-          style={s.search}
-          placeholder="Mahsulot qidirish…"
-          placeholderTextColor={colors.textFaint}
-          value={search}
-          onChangeText={setSearch}
-        />
-
         <View style={s.filters}>
-          <Pressable
+          <Chip
+            label="Filtr" active={faol > 0} count={faol}
             onPress={() => setSheetOpen(true)}
-            style={({ pressed }) => [
-              s.filterBtn, faol > 0 && s.filterBtnOn, pressed && { opacity: 0.7 },
-            ]}
-          >
-            <Icon name="sozlash" size={16} color={faol > 0 ? '#fff' : colors.text} />
-            <Text style={[font.small, { color: faol > 0 ? '#fff' : colors.text }]}>
-              Filtr{faol > 0 ? ` · ${faol}` : ''}
-            </Text>
-          </Pressable>
-
+          />
           {/* Yoqilgan filtrlar ko'rinib turadi — bosib o'chirish mumkin */}
           {filters.unit && (
-            <Pressable onPress={() => setFilters({ ...filters, unit: null })} style={s.tag}>
-              <Text style={[font.tiny, { color: colors.primary }]}>{filters.unit}  ✕</Text>
-            </Pressable>
+            <Chip label={`${filters.unit}  ✕`}
+              onPress={() => setFilters({ ...filters, unit: null })} />
           )}
           {filters.category && (
-            <Pressable onPress={() => setFilters({ ...filters, category: null })} style={s.tag}>
-              <Text style={[font.tiny, { color: colors.primary }]}>{filters.category}  ✕</Text>
-            </Pressable>
+            <Chip label={`${filters.category}  ✕`}
+              onPress={() => setFilters({ ...filters, category: null })} />
           )}
           {filters.status !== 'hammasi' && (
-            <Pressable onPress={() => setFilters({ ...filters, status: 'hammasi' })} style={s.tag}>
-              <Text style={[font.tiny, { color: colors.primary }]}>{filters.status}  ✕</Text>
-            </Pressable>
+            <Chip label={`${filters.status}  ✕`}
+              onPress={() => setFilters({ ...filters, status: 'hammasi' })} />
           )}
         </View>
       </View>
 
-      {!shown ? <Loading /> : (
+      {!shown ? (
+        <View style={{ paddingHorizontal: spacing.lg }}><SkeletonList /></View>
+      ) : (
         <FlatList
           data={shown}
           keyExtractor={(p) => p.id}
           contentContainerStyle={s.list}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
+              tintColor={colors.primary}
               onRefresh={async () => {
                 setRefreshing(true);
-                await load(search, filters).catch(() => {});
+                // Qo'lda tortish — "hozir yangila" degani, shuning uchun
+                // 60 soniyalik kutish chetlab o'tiladi.
+                setBarchasi(await productStore.sync(true).catch(() => barchasi ?? []));
                 setRefreshing(false);
               }}
             />
           }
           ListHeaderComponent={
-            taxminiy ? (
-              <View style={s.hint}>
-                <Icon name="qidiruv" size={15} color={colors.warning} />
-                <Text style={[font.small, { color: colors.warning, flex: 1 }]}>
-                  "{search.trim()}" aynan topilmadi — shunga o'xshashlari
-                </Text>
-              </View>
-            ) : null
+            <>
+              {taxminiy ? (
+                <View style={s.hint}>
+                  <Icon name="qidiruv" size={15} color={colors.warning} />
+                  <Text style={[font.small, { color: colors.warning, flex: 1 }]}>
+                    "{search.trim()}" aynan topilmadi — shunga o'xshashlari
+                  </Text>
+                </View>
+              ) : null}
+
+              {/* Tan narxsiz mahsulot hisobotni jimgina buzadi — foyda
+                  sotuv narxidan tan narxni ayirib topiladi, tan narx 0
+                  bo'lsa butun savdo foyda bo'lib chiqadi. Xato o'zini
+                  ko'rsatmaydi, shuning uchun uni biz ko'rsatamiz. */}
+              {options && options.counts.tannarxsiz > 0
+                && filters.status !== 'tannarxsiz' && !search.trim() ? (
+                <PressScale
+                  accessibilityRole="button"
+                  accessibilityLabel="Tan narxi yo'q mahsulotlarni ko'rsatish"
+                  onPress={() => setFilters({ ...filters, status: 'tannarxsiz' })}
+                  scale={0.99}
+                  style={s.tannarxsiz}
+                >
+                  <Icon name="ogohlantirish" size={17} color={colors.danger} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={[font.smallBold, { color: colors.danger }]}>
+                      {options.counts.tannarxsiz} ta mahsulotda tan narx yo'q
+                    </Text>
+                    <Text style={[font.tiny, { color: colors.danger }]}>
+                      Ularning har bir savdosi to'liq foyda bo'lib hisoblanmoqda
+                    </Text>
+                  </View>
+                  <Icon name="oldinga" size={15} color={colors.danger} />
+                </PressScale>
+              ) : null}
+            </>
           }
           ListEmptyComponent={
             <Empty
               icon="mahsulot"
               title={search ? 'Topilmadi' : "Ombor bo'sh"}
-              hint={search ? 'Boshqa nom bilan qidirib ko\'ring'
-                : "Yuqoridagi + tugmasi bilan mahsulot qo'shing"}
+              hint={search ? "Boshqa nom bilan qidirib ko'ring"
+                : 'Birinchi mahsulotni qo\'shing — savdo shundan boshlanadi'}
+              action={search ? undefined : {
+                title: "Mahsulot qo'shish", icon: 'qoshish',
+                onPress: () => router.push('/product/new'),
+              }}
             />
           }
-          renderItem={({ item }) => <Row product={item} onPress={() => router.push(`/product/${item.id}`)} />}
+          renderItem={({ item }) => (
+            <Row product={item} onPress={() => router.push(`/product/${item.id}`)} />
+          )}
         />
       )}
 
@@ -169,11 +218,18 @@ export default function ProductsScreen() {
 function Row({ product: p, onPress }: { product: Product; onPress: () => void }) {
   const out = Number(p.stock) <= 0;
   const low = !out && Number(p.stock) <= Number(p.min_stock);
+  const tanNarxsiz = Number(p.cost_price) <= 0;
 
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => [s.row, pressed && { opacity: 0.7 }]}>
+    <PressScale
+      accessibilityRole="button"
+      accessibilityLabel={`${p.name}, ${qty(p.stock)} ${p.unit}, ${money(p.sale_price)} so'm`}
+      onPress={onPress}
+      scale={0.985}
+      style={[s.row, out ? { borderLeftWidth: 3, borderLeftColor: colors.danger } : null]}
+    >
       {p.photo_url
-        ? <Image source={{ uri: p.photo_url }} style={s.thumb} contentFit="cover" />
+        ? <Image source={{ uri: p.photo_url }} style={s.thumb} contentFit="cover" transition={180} />
         : (
           <View style={[s.thumb, s.thumbEmpty]}>
             <Icon name="mahsulot" size={22} color={colors.textFaint} />
@@ -185,61 +241,65 @@ function Row({ product: p, onPress }: { product: Product; onPress: () => void })
         <Text style={[font.small, { color: colors.textMuted }]}>
           {money(p.sale_price)} so'm / {p.unit}
         </Text>
+        {tanNarxsiz && (
+          <Text style={[font.tiny, { color: colors.danger }]}>
+            tan narx yo'q — foyda hisoblanmaydi
+          </Text>
+        )}
       </View>
 
-      <View style={{ alignItems: 'flex-end', gap: 4 }}>
+      <View style={{ alignItems: 'flex-end', gap: 5 }}>
         <Text style={[
-          font.bodyBold,
+          font.num,
           { color: out ? colors.danger : low ? colors.warning : colors.text },
         ]}>
           {qty(p.stock)} {p.unit}
         </Text>
-        {out ? <Badge text="tugagan" tone="danger" />
-          : low ? <Badge text="tugayapti" tone="warning" /> : null}
+        {out ? <Badge text="tugagan" tone="danger" dot />
+          : low ? <Badge text="tugayapti" tone="warning" dot /> : null}
       </View>
-    </Pressable>
+    </PressScale>
   );
 }
 
 const s = StyleSheet.create({
-  head: { padding: spacing.lg, gap: spacing.md, backgroundColor: colors.bg },
-  headRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
-  plusBtn: {
-    width: 40, height: 40, borderRadius: radius.md,
-    backgroundColor: colors.primary,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  search: {
+  tools: { paddingHorizontal: spacing.lg, gap: spacing.md, paddingBottom: spacing.md },
+  searchBox: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
     backgroundColor: colors.surface,
     borderRadius: radius.md,
     paddingHorizontal: spacing.md,
-    height: 44, fontSize: 16, color: colors.text,
+    height: 46,
     borderWidth: 1, borderColor: colors.border,
   },
+  search: {
+    flex: 1, height: '100%',
+    fontSize: 16, fontFamily: 'Inter_500Medium', color: colors.text,
+  },
   filters: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, alignItems: 'center' },
-  filterBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    paddingHorizontal: spacing.md, paddingVertical: 8,
-    borderRadius: radius.pill, backgroundColor: colors.surfaceAlt,
+  tannarxsiz: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    backgroundColor: colors.dangerSoft,
+    borderWidth: 1, borderColor: colors.dangerLine,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
+    marginBottom: spacing.sm,
   },
-  filterBtnOn: { backgroundColor: colors.primary },
-  tag: {
-    paddingHorizontal: spacing.md, paddingVertical: 7,
-    borderRadius: radius.pill, backgroundColor: colors.primarySoft,
-  },
-  list: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl, gap: spacing.sm },
+  list: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xxxl, gap: spacing.sm },
   hint: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
     backgroundColor: colors.warningSoft,
+    borderWidth: 1, borderColor: colors.warningLine,
     borderRadius: radius.md, padding: spacing.md, marginBottom: spacing.xs,
   },
   row: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.md,
     backgroundColor: colors.surface,
     borderRadius: radius.lg, padding: spacing.md,
-    ...shadow,
+    borderWidth: 1, borderColor: colors.borderSoft,
+    ...elevation[1],
   },
-  thumb: { width: 46, height: 46, borderRadius: radius.md },
+  thumb: { width: 48, height: 48, borderRadius: radius.md },
   thumbEmpty: {
     backgroundColor: colors.surfaceAlt,
     alignItems: 'center', justifyContent: 'center',

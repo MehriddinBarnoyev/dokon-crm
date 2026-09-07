@@ -35,14 +35,30 @@ export interface DebtEntry {
   note: string | null; created_at: string; sale_id: string | null; user_name: string | null;
 }
 
+export interface Expense {
+  id: string; category: string; amount: number; note: string | null;
+  source: string; created_at: string; updated_at: string;
+  user_name: string | null;
+}
+
+/** `GET /expenses/meta/categories` — chip'lar shu tartibda chiqadi. */
+export interface ExpenseCategory { name: string; count: number; total: number }
+
 export interface Dashboard {
   today: {
     sales_total: number; cash_in: number; expense_total: number;
     net_profit: number; sales_count: number;
+    /** Shu kuni sotilgan, lekin puli hali olinmagan summa */
+    credit_total: number;
+    /** `net_profit` ichidagi qarzda qolgan ulush — hali qo'lga tushmagan foyda */
+    credit_profit: number;
   };
   debts: { total_owed: number; debtor_count: number; overdue_count: number };
   low_stock: Array<{ id: string; name: string; stock: number; min_stock: number; unit: Unit }>;
-  week: Array<{ day: string; sales_total: number; expense_total: number; net_profit: number }>;
+  week: Array<{
+    day: string; sales_total: number; expense_total: number;
+    net_profit: number; credit_profit: number;
+  }>;
 }
 
 /** AI tayyorlagan amal — foydalanuvchi tasdiqlagach bajariladi. */

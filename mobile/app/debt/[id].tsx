@@ -1,14 +1,18 @@
 import { useCallback, useState } from 'react';
-import {
-  Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View,
-} from 'react-native';
+import { Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { api } from '../../src/api/client';
 import type { DebtEntry } from '../../src/api/types';
-import { Badge, Button, Card, Field, Loading } from '../../src/components/ui';
+import { Badge, Button, Card, Field, IconButton } from '../../src/components/ui';
+import { ScreenHeader } from '../../src/components/ScreenHeader';
+import { SkeletonCard, SkeletonList } from '../../src/components/Skeleton';
+import { AnimatedMoney } from '../../src/components/AnimatedNumber';
 import { useConfirm } from '../../src/components/Confirm';
-import { colors, dateLabel, font, money, radius, spacing } from '../../src/theme';
+import { useToast } from '../../src/components/Toast';
+import {
+  colors, dateLabel, font, money, radius, sanaMatni, spacing,
+} from '../../src/theme';
 import { Icon } from '../../src/components/Icon';
 
 interface Purchase {
@@ -29,6 +33,7 @@ export default function DebtDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const confirm = useConfirm();
+  const toast = useToast();
   const [d, setD] = useState<CustomerDebt | null>(null);
   const [mode, setMode] = useState<null | 'payment' | 'debt'>(null);
   const [amount, setAmount] = useState('');
@@ -44,7 +49,7 @@ export default function DebtDetail() {
   async function submit() {
     const v = Number(amount);
     if (!Number.isFinite(v) || v <= 0) {
-      Alert.alert('Xato', 'Summani to\'g\'ri kiriting.');
+      toast.ogoh("Summani to'g'ri kiriting");
       return;
     }
     const tolov = mode === 'payment';
@@ -87,56 +92,73 @@ export default function DebtDetail() {
       }
       setMode(null); setAmount(''); setDue('');
       await load();
+      toast.ok(tolov
+        ? `${money(v)} so'm to'lov qabul qilindi`
+        : `${d!.name}ga ${money(v)} so'm qarz yozildi`);
     } catch (e: any) {
-      Alert.alert('Xato', e.message);
+      toast.xato(e.message);
     } finally {
       setBusy(false);
     }
   }
 
-  if (!d) return <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}><Loading /></SafeAreaView>;
+  if (!d) {
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
+        <ScreenHeader
+          title="Mijoz"
+          left={<IconButton name="orqaga" label="Orqaga" onPress={() => router.back()} tone="soft" size={22} />}
+        />
+        <View style={{ paddingHorizontal: spacing.lg, gap: spacing.md }}>
+          <SkeletonCard lines={2} />
+          <SkeletonList rows={4} />
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   const overdue = d.nearest_due && new Date(d.nearest_due) < new Date() && Number(d.balance) > 0;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
-      <View style={s.head}>
-        <Pressable onPress={() => router.back()} hitSlop={10}>
-          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-            <Icon name="orqaga" size={20} color={colors.primary} />
-            <Text style={[font.body, { color: colors.primary }]}>Orqaga</Text>
-          </View>
-        </Pressable>
-      </View>
+      <ScreenHeader
+        title={d.name}
+        subtitle={d.phone ?? undefined}
+        left={
+          <IconButton
+            name="orqaga" label="Orqaga" tone="soft" size={22}
+            onPress={() => router.back()}
+          />
+        }
+        action={d.phone ? {
+          icon: 'telefon', label: `${d.name} ga qo'ng'iroq qilish`,
+          onPress: () => Linking.openURL(`tel:${d.phone}`),
+        } : undefined}
+      />
 
-      <ScrollView contentContainerStyle={s.scroll}>
-        <View style={{ alignItems: 'center', gap: spacing.sm }}>
+      <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
+        <Card tone="raised" style={{ alignItems: 'center', gap: spacing.xs }}>
           <View style={s.avatar}>
             <Text style={[font.h1, { color: colors.primary }]}>
               {d.name.charAt(0).toUpperCase()}
             </Text>
           </View>
-          <Text style={[font.h2, { color: colors.text }]}>{d.name}</Text>
-          {d.phone ? (
-            <Pressable onPress={() => Linking.openURL(`tel:${d.phone}`)}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <Icon name="telefon" size={16} color={colors.primary} />
-                <Text style={[font.body, { color: colors.primary }]}>{d.phone}</Text>
-              </View>
-            </Pressable>
-          ) : null}
-        </View>
-
-        <Card style={{ alignItems: 'center', gap: spacing.xs }}>
-          <Text style={[font.small, { color: colors.textMuted }]}>Joriy qarz</Text>
-          <Text style={[font.h1, {
-            color: Number(d.balance) > 0 ? colors.danger : colors.success,
-          }]}>
-            {money(d.balance)} <Text style={font.h3}>so'm</Text>
+          <Text style={[font.label, { color: colors.textMuted, marginTop: spacing.sm }]}>
+            JORIY QARZ
           </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 6 }}>
+            <AnimatedMoney
+              value={Number(d.balance)}
+              style={[font.display, {
+                color: Number(d.balance) > 0 ? colors.danger : colors.success,
+              }]}
+            />
+            <Text style={[font.h3, { color: colors.textMuted, paddingBottom: 4 }]}>so'm</Text>
+          </View>
           {d.nearest_due ? (
             <Badge
-              text={`Muddat: ${d.nearest_due}`}
+              dot
+              text={`Muddat: ${sanaMatni(d.nearest_due)}`}
               tone={overdue ? 'danger' : 'neutral'}
             />
           ) : null}
@@ -172,9 +194,9 @@ export default function DebtDetail() {
           </Card>
         ) : (
           <View style={{ flexDirection: 'row', gap: spacing.sm }}>
-            <Button title="To'lov qabul qilish" style={{ flex: 1 }}
+            <Button title="To'lov oldim" icon="pul" style={{ flex: 1 }}
               onPress={() => setMode('payment')} />
-            <Button title="Qarz berish" variant="secondary" style={{ flex: 1 }}
+            <Button title="Qarz berish" icon="qarz" variant="secondary" style={{ flex: 1 }}
               onPress={() => setMode('debt')} />
           </View>
         )}
@@ -193,7 +215,7 @@ export default function DebtDetail() {
               {d.purchases.slice(0, 20).map((p) => (
                 <View key={p.id} style={{ gap: 2 }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
-                    <Text style={[font.bodyBold, { color: colors.text, flex: 1 }]}>
+                    <Text style={[font.num, { color: colors.text, flex: 1 }]}>
                       {money(p.total)} so'm
                     </Text>
                     <Badge text={p.payment_method}
@@ -236,10 +258,10 @@ export default function DebtDetail() {
                   </Text>
                   <Text style={[font.tiny, { color: colors.textFaint }]}>
                     {dateLabel(h.created_at)}
-                    {h.due_date ? ` · muddat ${h.due_date}` : ''}
+                    {h.due_date ? ` · muddat ${sanaMatni(h.due_date)}` : ''}
                   </Text>
                 </View>
-                <Text style={[font.bodyBold, {
+                <Text style={[font.num, {
                   color: isPayment ? colors.success : colors.danger,
                 }]}>
                   {isPayment ? '−' : '+'}{money(Math.abs(Number(h.amount)))}
@@ -254,10 +276,11 @@ export default function DebtDetail() {
 }
 
 const s = StyleSheet.create({
-  head: { padding: spacing.lg, paddingBottom: spacing.sm },
-  scroll: { padding: spacing.lg, paddingTop: 0, gap: spacing.md, paddingBottom: spacing.xxl },
+  scroll: {
+    paddingHorizontal: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxxl,
+  },
   avatar: {
-    width: 72, height: 72, borderRadius: 36,
+    width: 64, height: 64, borderRadius: radius.pill,
     backgroundColor: colors.primarySoft,
     alignItems: 'center', justifyContent: 'center',
   },

@@ -13,16 +13,19 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  Alert, KeyboardAvoidingView, Platform, Pressable,
+  KeyboardAvoidingView, Platform, Pressable,
   ScrollView, StyleSheet, Text, View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { api } from '../../../src/api/client';
+import * as productStore from '../../../src/data/products';
 import type { Product, ProductDefaults, Unit } from '../../../src/api/types';
 import { Button, Field, Loading } from '../../../src/components/ui';
+import { ModalHeader } from '../../../src/components/ScreenHeader';
 import { useConfirm } from '../../../src/components/Confirm';
+import { useToast } from '../../../src/components/Toast';
 import { colors, font, money, qty, radius, spacing } from '../../../src/theme';
 import { Icon } from '../../../src/components/Icon';
 
@@ -39,6 +42,7 @@ export default function EditProductScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const confirm = useConfirm();
+  const toast = useToast();
   const [permission, requestPermission] = useCameraPermissions();
 
   const [p, setP] = useState<Product | null>(null);
@@ -61,8 +65,10 @@ export default function EditProductScreen() {
     setP(res);
     setName(res.name);
     setUnit(res.unit);
-    setCostPrice(String(Number(res.cost_price)));
-    setSalePrice(String(Number(res.sale_price)));
+    // Nol — "kiritilmagan" degani. Maydonni "0" bilan to'ldirsak do'konchi
+    // avval uni o'chirishi kerak bo'ladi; bo'sh qoldirgani qulayroq.
+    setCostPrice(Number(res.cost_price) > 0 ? String(Number(res.cost_price)) : '');
+    setSalePrice(Number(res.sale_price) > 0 ? String(Number(res.sale_price)) : '');
     setMinStock(String(Number(res.min_stock)));
     setCategory(res.category ?? '');
     setBarcode(res.barcode ?? '');
@@ -70,7 +76,7 @@ export default function EditProductScreen() {
 
   useEffect(() => {
     load().catch((e: any) => {
-      Alert.alert('Ochib bo\'lmadi', e.message);
+      toast.xato(`Ochib bo'lmadi: ${e.message}`);
       router.back();
     });
     api<ProductDefaults>('/products/meta/defaults')
@@ -84,7 +90,7 @@ export default function EditProductScreen() {
     if (!permission?.granted) {
       const r = await requestPermission();
       if (!r.granted) {
-        Alert.alert('Ruxsat kerak', 'Kameraga ruxsat bermasangiz skanerlab bo\'lmaydi.');
+        toast.ogoh("Kameraga ruxsat bermasangiz skanerlab bo'lmaydi");
         return;
       }
     }
@@ -111,7 +117,7 @@ export default function EditProductScreen() {
   async function save() {
     if (!p) return;
     if (!name.trim()) {
-      Alert.alert('Nom kerak', 'Mahsulot nomini kiriting.');
+      toast.ogoh('Mahsulot nomini kiriting');
       return;
     }
 
@@ -152,7 +158,7 @@ export default function EditProductScreen() {
     }
 
     if (lines.length === 0) {
-      Alert.alert('O\'zgarish yo\'q', 'Hech narsa o\'zgartirilmadi.');
+      toast.info("Hech narsa o'zgartirilmadi");
       return;
     }
 
@@ -181,9 +187,10 @@ export default function EditProductScreen() {
     setSaving(true);
     try {
       await api(`/products/${id}`, { method: 'PATCH', body: patch });
+      productStore.invalidate();
       router.back();
     } catch (e: any) {
-      Alert.alert('Saqlab bo\'lmadi', e.message);
+      toast.xato(`Saqlab bo'lmadi: ${e.message}`);
     } finally {
       setSaving(false);
     }
@@ -215,11 +222,12 @@ export default function EditProductScreen() {
     setSaving(true);
     try {
       await api(`/products/${id}`, { method: 'PATCH', body: { is_active: false } });
+      productStore.invalidate();
       // Orqada mahsulot sahifasi turibdi — u endi arxivlangan narsani
       // ko'rsatadi, shuning uchun to'g'ridan-to'g'ri ro'yxatga qaytamiz.
       router.dismissTo('/(tabs)/products');
     } catch (e: any) {
-      Alert.alert('Arxivlab bo\'lmadi', e.message);
+      toast.xato(`Arxivlab bo'lmadi: ${e.message}`);
       setSaving(false);
     }
   }
@@ -260,6 +268,9 @@ export default function EditProductScreen() {
 
   /* -------------------------------- Forma -------------------------------- */
   const margin = (Number(salePrice) || 0) - (Number(costPrice) || 0);
+  // Bazadagi holat bo'yicha, kiritilayotgan matn bo'yicha emas — do'konchi
+  // yozishni boshlashi bilan ogohlantirish yo'qolib qolmasin.
+  const tanNarxYoq = Number(p.cost_price) <= 0;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
@@ -267,15 +278,7 @@ export default function EditProductScreen() {
         style={{ flex: 1 }}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <View style={s.head}>
-          <Pressable onPress={() => router.back()} hitSlop={10}>
-            <Text style={[font.body, { color: colors.primary }]}>Bekor</Text>
-          </Pressable>
-          <Text style={[font.h3, { color: colors.text, flex: 1, textAlign: 'center' }]}>
-            Tahrirlash
-          </Text>
-          <View style={{ width: 44 }} />
-        </View>
+        <ModalHeader title="Tahrirlash" onClose={() => router.back()} />
 
         <ScrollView contentContainerStyle={s.scroll} keyboardShouldPersistTaps="handled">
           <Field label="Nomi" value={name} onChangeText={setName} />
@@ -301,12 +304,29 @@ export default function EditProductScreen() {
             )}
           </View>
 
+          {/* Tan narx keyin ham kiritilishi mumkin — mahsulot allaqachon
+              omborda, uni qayta yaratish shart emas. Lekin kiritilmaguncha
+              shu mahsulotning har bir savdosi to'liq foyda bo'lib yoziladi,
+              shuning uchun buni aytib turamiz. */}
+          {tanNarxYoq && (
+            <View style={s.tanNarxOgoh}>
+              <Icon name="ogohlantirish" size={17} color={colors.danger} />
+              <Text style={[font.small, { color: colors.danger, flex: 1 }]}>
+                Tan narx kiritilmagan — savdolari to'liq foyda bo'lib hisoblanmoqda.
+                Quyiga yozib qo'ysangiz keyingi savdolar to'g'ri hisoblanadi.
+              </Text>
+            </View>
+          )}
+
           <View style={{ flexDirection: 'row', gap: spacing.sm }}>
             <Field label="Tan narxi" value={costPrice} onChangeText={setCostPrice}
-              keyboardType="number-pad" style={{ flex: 1 }} />
+              keyboardType="number-pad" style={{ flex: 1 }}
+              placeholder="0" suffix="so'm"
+              hint="qanchaga olib kelindi" />
             <Field label="Sotuv narxi" value={salePrice} onChangeText={setSalePrice}
               keyboardType="number-pad" style={{ flex: 1 }}
-              hint={margin > 0 ? `Foyda: ${money(margin)} so'm` : undefined} />
+              placeholder="0" suffix="so'm"
+              hint={margin > 0 ? `foyda ${money(margin)} so'm` : 'qanchaga sotiladi'} />
           </View>
 
           <Field label="Ogohlantirish chegarasi" value={minStock}
@@ -375,6 +395,12 @@ const s = StyleSheet.create({
   note: {
     flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-start',
     backgroundColor: colors.surfaceAlt, borderRadius: radius.md, padding: spacing.md,
+  },
+  tanNarxOgoh: {
+    flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-start',
+    backgroundColor: colors.dangerSoft,
+    borderWidth: 1, borderColor: colors.dangerLine,
+    borderRadius: radius.md, padding: spacing.md,
   },
   scanOverlay: {
     position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,

@@ -16,14 +16,20 @@
  */
 import { useEffect, useState } from 'react';
 import {
-  ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View,
+  ActivityIndicator, ScrollView, StyleSheet, Text, TextInput, View,
 } from 'react-native';
 import { Image } from 'expo-image';
+import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 import { api } from '../api/client';
+import * as productStore from '../data/products';
 import type { AiAction, AiCommandResponse, AiNomzod, AiTanlov, Product } from '../api/types';
 import { Badge, Button } from './ui';
+import { PressScale } from './Press';
+import { useToast } from './Toast';
 import { Icon, type IconName } from './Icon';
-import { colors, font, money, qty, radius, shadow, spacing } from '../theme';
+import {
+  colors, elevation, font, money, qty, radius, sanaMatni, spacing,
+} from '../theme';
 
 const MISOLLAR = [
   '2 kg piyoz sotildi',
@@ -64,7 +70,7 @@ function describe(a: AiAction): { icon: IconName; title: string; lines: string[]
         icon: 'qarz', tone: 'warning', title: 'Qarz berildi',
         lines: [
           `${a.customer_name} — ${money(a.amount)} so'm`,
-          ...(a.due_date ? [`Muddat: ${a.due_date}`] : []),
+          ...(a.due_date ? [`Muddat: ${sanaMatni(a.due_date)}`] : []),
         ],
       };
     case 'debt_payment':
@@ -193,10 +199,13 @@ function TanlovKarta({ t, onPick }: { t: AiTanlov; onPick: (c: AiNomzod) => void
       )}
 
       {t.nomzodlar.map((c) => (
-        <Pressable
+        <PressScale
           key={c.id}
+          accessibilityRole="button"
+          accessibilityLabel={c.name}
           onPress={() => onPick(c)}
-          style={({ pressed }) => [s.nomzod, pressed && { opacity: 0.6 }]}
+          scale={0.97}
+          style={s.nomzod}
         >
           {c.photo_url
             ? <Image source={{ uri: c.photo_url }} style={s.thumb} contentFit="cover" />
@@ -213,13 +222,14 @@ function TanlovKarta({ t, onPick }: { t: AiTanlov; onPick: (c: AiNomzod) => void
           </View>
 
           <Icon name="oldinga" size={16} color={colors.textFaint} />
-        </Pressable>
+        </PressScale>
       ))}
     </View>
   );
 }
 
 export function AiCommandBar({ onDone }: { onDone?: () => void }) {
+  const toast = useToast();
   const [text, setText] = useState('');
   const [thinking, setThinking] = useState(false);
   const [executing, setExecuting] = useState(false);
@@ -229,25 +239,30 @@ export function AiCommandBar({ onDone }: { onDone?: () => void }) {
 
   const bolak = mahsulotBolagi(text.split('\n').pop() ?? '');
 
+  /** Mahalliy katalog — taklif uchun shundan qidiriladi. */
+  const [katalog, setKatalog] = useState<Product[]>([]);
+
+  useEffect(() => {
+    let tirik = true;
+    productStore.loadAndRefresh((yangi) => { if (tirik) setKatalog(yangi); })
+      .then((darhol) => { if (tirik) setKatalog(darhol); })
+      .catch(() => {});
+    return () => { tirik = false; };
+  }, []);
+
   /**
-   * Nom yozilayotganda mahsulotlarni taklif qilamiz — AI'siz, to'g'ridan-to'g'ri
-   * `/products?search=` orqali. Bu ombor ekranidagi qidiruvning AYNAN o'zi,
-   * shuning uchun taklif bilan keyin topiladigan mahsulot bir xil bo'ladi.
+   * Nom yozilayotganda mahsulotlarni taklif qilamiz — AI'siz.
    *
-   * Kassir taklifni bossa, nom gapga aniq ko'chiriladi va yuborilgandan keyin
-   * "qaysi kolbasa?" degan savol umuman chiqmaydi.
+   * Ilgari bu har harfda `/products?search=` ga so'rov yuborardi. Endi
+   * qidiruv MAHALLIY cache'da bajariladi: natija bir xil (qidiruv qoidasi
+   * server bilan ayni), lekin so'rov yo'q va kutish ham yo'q. Debounce
+   * ham kerak emas — hisob-kitob qurilmada bir zumda tugaydi.
    */
   useEffect(() => {
     const q = bolak?.matn.trim() ?? '';
     if (q.length < 2 || result) { setTakliflar([]); return; }
-
-    const id = setTimeout(() => {
-      api<Product[]>(`/products?search=${encodeURIComponent(q)}&limit=6`)
-        .then(setTakliflar)
-        .catch(() => setTakliflar([]));
-    }, 250);
-    return () => clearTimeout(id);
-  }, [bolak?.matn, result]);
+    setTakliflar(productStore.qidir(katalog, q, 6));
+  }, [bolak?.matn, result, katalog]);
 
   /**
    * Yozilgani mahsulot nomining O'ZI bo'lsa, uni taklifda ko'rsatishning
@@ -281,7 +296,7 @@ export function AiCommandBar({ onDone }: { onDone?: () => void }) {
       });
       setResult(res);
     } catch (e: any) {
-      Alert.alert('AI javob bermadi', e.message);
+      toast.xato(`AI javob bermadi: ${e.message}`);
     } finally {
       setThinking(false);
     }
@@ -335,17 +350,34 @@ export function AiCommandBar({ onDone }: { onDone?: () => void }) {
       });
       setResult(null);
       setText('');
-      Alert.alert('Bajarildi', res.summary);
+      toast.ok(res.summary);
+      for (const w of res.warnings ?? []) toast.ogoh(w);
       onDone?.();
     } catch (e: any) {
-      Alert.alert('Yozib bo\'lmadi', e.message);
+      toast.xato(`Yozib bo'lmadi: ${e.message}`);
     } finally {
       setExecuting(false);
     }
   }
 
+  const bosh = !result && !thinking && text.length === 0;
+
   return (
     <View style={s.wrap}>
+      {/* Sarlavha — bu maydon nima ekanini aytadi. Bo'sh quti odamni
+          "bu yerga nima yozaman?" degan savol bilan qoldiradi. */}
+      <View style={s.head}>
+        <View style={s.headIcon}>
+          <Icon name="ai" size={15} color={colors.accent} />
+        </View>
+        <Text style={[font.label, { color: colors.textMuted, flex: 1 }]}>
+          AI YORDAMCHI
+        </Text>
+        {bosh ? (
+          <Text style={[font.tiny, { color: colors.textFaint }]}>oddiy gap bilan yozing</Text>
+        ) : null}
+      </View>
+
       <View style={s.inputRow}>
         <TextInput
           style={s.input}
@@ -357,29 +389,32 @@ export function AiCommandBar({ onDone }: { onDone?: () => void }) {
           onSubmitEditing={send}
           editable={!thinking && !executing}
         />
-        <Pressable
+        <PressScale
+          accessibilityRole="button"
+          accessibilityLabel="AI ga yuborish"
           onPress={send}
+          feedback
+          scale={0.9}
           disabled={thinking || text.trim().length < 2}
-          style={({ pressed }) => [
-            s.sendBtn,
-            (thinking || text.trim().length < 2) && { opacity: 0.4 },
-            pressed && { opacity: 0.7 },
-          ]}
+          style={s.sendBtn}
         >
           {thinking
-            ? <ActivityIndicator color="#fff" size="small" />
-            : <Icon name="yuborish" size={20} color="#fff" />}
-        </Pressable>
+            ? <ActivityIndicator color={colors.onPrimary} size="small" />
+            : <Icon name="yuborish" size={20} color={colors.onPrimary} />}
+        </PressScale>
       </View>
 
       {/* Yozayotganda mahsulot takliflari — bosilsa nom gapga qo'yiladi */}
       {korinadigan.length > 0 && !result && (
-        <View style={s.takliflar}>
+        <Animated.View entering={FadeIn.duration(160)} style={s.takliflar}>
           {korinadigan.map((p) => (
-            <Pressable
+            <PressScale
               key={p.id}
+              accessibilityRole="button"
+              accessibilityLabel={p.name}
               onPress={() => taklifniQoy(p)}
-              style={({ pressed }) => [s.taklif, pressed && { opacity: 0.6 }]}
+              scale={0.98}
+              style={s.taklif}
             >
               {p.photo_url
                 ? <Image source={{ uri: p.photo_url }} style={s.thumb} contentFit="cover" />
@@ -397,9 +432,9 @@ export function AiCommandBar({ onDone }: { onDone?: () => void }) {
                 </Text>
               </View>
               <Icon name="oldinga" size={15} color={colors.textFaint} />
-            </Pressable>
+            </PressScale>
           ))}
-        </View>
+        </Animated.View>
       )}
 
       {/* Misollar — faqat bo'sh holatda */}
@@ -407,22 +442,33 @@ export function AiCommandBar({ onDone }: { onDone?: () => void }) {
         <ScrollView horizontal showsHorizontalScrollIndicator={false}
           contentContainerStyle={{ gap: spacing.sm, paddingVertical: spacing.xs }}>
           {MISOLLAR.map((m) => (
-            <Pressable key={m} onPress={() => setText(m)} style={s.chip}>
+            <PressScale
+              key={m}
+              accessibilityRole="button"
+              accessibilityLabel={m}
+              onPress={() => setText(m)}
+              scale={0.94}
+              style={s.chip}
+            >
+              <Icon name="yulduz" size={12} color={colors.textFaint} />
               <Text style={[font.tiny, { color: colors.textMuted }]}>{m}</Text>
-            </Pressable>
+            </PressScale>
           ))}
         </ScrollView>
       )}
 
       {thinking && (
-        <Text style={[font.small, { color: colors.textMuted, paddingVertical: spacing.sm }]}>
-          O'ylayapman…
-        </Text>
+        <Animated.View entering={FadeIn.duration(160)} style={s.thinking}>
+          <Icon name="ai" size={15} color={colors.accent} />
+          <Text style={[font.small, { color: colors.textMuted }]}>
+            O'ylayapman — gapingizni yozuvga aylantiryapman…
+          </Text>
+        </Animated.View>
       )}
 
       {/* Natija: nima yoziladi */}
       {result && (
-        <View style={s.result}>
+        <Animated.View entering={FadeInDown.duration(220)} style={s.result}>
           <Text style={[font.body, { color: colors.text }]}>{result.summary}</Text>
 
           {/* Ma'lumot yetishmasa — AI ning savoli */}
@@ -481,7 +527,7 @@ export function AiCommandBar({ onDone }: { onDone?: () => void }) {
           ) : (
             <Button title="Yopish" variant="secondary" onPress={() => setResult(null)} />
           )}
-        </View>
+        </Animated.View>
       )}
     </View>
   );
@@ -493,37 +539,56 @@ const s = StyleSheet.create({
     borderRadius: radius.lg,
     padding: spacing.md,
     gap: spacing.sm,
-    ...shadow,
+    borderWidth: 1,
+    borderColor: colors.borderSoft,
+    ...elevation[2],
+  },
+  head: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  headIcon: {
+    width: 24, height: 24, borderRadius: radius.xs,
+    backgroundColor: colors.accentSoft,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  thinking: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    paddingVertical: spacing.sm,
   },
   inputRow: { flexDirection: 'row', alignItems: 'flex-end', gap: spacing.sm },
   input: {
     flex: 1,
-    minHeight: 44,
+    minHeight: 46,
     maxHeight: 110,
-    backgroundColor: colors.surfaceAlt,
+    backgroundColor: colors.surfaceSunken,
     borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
     paddingHorizontal: spacing.md,
     paddingTop: 12,
     paddingBottom: 12,
     fontSize: 16,
+    fontFamily: 'Inter_400Regular',
     color: colors.text,
   },
   sendBtn: {
-    width: 44, height: 44,
+    width: 46, height: 46,
     borderRadius: radius.md,
     backgroundColor: colors.primary,
     alignItems: 'center', justifyContent: 'center',
+    ...elevation[1],
   },
   chip: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
-    backgroundColor: colors.surfaceAlt,
+    backgroundColor: colors.surfaceSunken,
     borderRadius: radius.pill,
+    borderWidth: 1, borderColor: colors.borderSoft,
   },
   result: { gap: spacing.md, paddingTop: spacing.sm },
   action: {
-    backgroundColor: colors.surfaceAlt,
+    backgroundColor: colors.surfaceSunken,
     borderRadius: radius.md,
+    borderWidth: 1, borderColor: colors.borderSoft,
     padding: spacing.md,
     gap: 3,
   },
@@ -543,12 +608,12 @@ const s = StyleSheet.create({
     borderBottomColor: colors.border,
   },
   tanlov: {
-    backgroundColor: colors.surfaceAlt,
+    backgroundColor: colors.warningSoft,
     borderRadius: radius.md,
     padding: spacing.md,
-    gap: spacing.xs,
+    gap: spacing.sm,
     borderWidth: 1,
-    borderColor: colors.warningSoft,
+    borderColor: colors.warningLine,
   },
   nomzod: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
@@ -565,6 +630,7 @@ const s = StyleSheet.create({
   warn: {
     backgroundColor: colors.warningSoft,
     borderRadius: radius.md,
+    borderWidth: 1, borderColor: colors.warningLine,
     padding: spacing.md,
     gap: spacing.xs,
   },

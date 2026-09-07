@@ -6,6 +6,7 @@
  * yoki EXPO_PUBLIC_API_URL muhit o'zgaruvchisi bilan beriladi.
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 import Constants from 'expo-constants';
 
 const TOKEN_KEY = 'dokon.token';
@@ -32,18 +33,57 @@ function resolveBaseUrl(): string {
 
 export const BASE_URL = resolveBaseUrl();
 
+/**
+ * TOKEN qurilmaning apparat omboriga yoziladi (iOS Keychain / Android
+ * Keystore) — `vault` dagi shifrlash kaliti bilan bir joyda. AsyncStorage
+ * oddiy fayl edi: qurilma zaxira nusxasiga ham tushardi.
+ *
+ * `keychainAccessible: AFTER_FIRST_UNLOCK` — do'konchining telefonida ekran
+ * qulfi bo'lmasligi mumkin, shunda ham token o'qilsin.
+ */
+const TOKEN_OPTS = { keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK } as const;
+
 let memoryToken: string | null = null;
+let tokenOqildi = false;
 
 export async function getToken(): Promise<string | null> {
   if (memoryToken) return memoryToken;
-  memoryToken = await AsyncStorage.getItem(TOKEN_KEY);
+  if (tokenOqildi) return null;
+
+  memoryToken = await SecureStore.getItemAsync(TOKEN_KEY).catch(() => null);
+
+  // 1.4.0 gacha token AsyncStorage'da saqlanardi. Bir martalik ko'chirish —
+  // busiz eski versiyadan yangilangan har bir foydalanuvchi qaytadan
+  // kirishga majbur bo'lardi.
+  if (!memoryToken) {
+    const eski = await AsyncStorage.getItem(TOKEN_KEY).catch(() => null);
+    if (eski) {
+      memoryToken = eski;
+      const kochdi = await SecureStore.setItemAsync(TOKEN_KEY, eski, TOKEN_OPTS)
+        .then(() => true).catch(() => false);
+      // Ko'chira olmasak eskisini QOLDIRAMIZ — aks holda token butunlay
+      // yo'qolib, foydalanuvchi seansidan ayrilardi.
+      if (kochdi) await AsyncStorage.removeItem(TOKEN_KEY).catch(() => {});
+    }
+  }
+
+  tokenOqildi = true;
   return memoryToken;
 }
 
 export async function setToken(token: string | null) {
   memoryToken = token;
-  if (token) await AsyncStorage.setItem(TOKEN_KEY, token);
-  else await AsyncStorage.removeItem(TOKEN_KEY);
+  tokenOqildi = true;
+
+  if (token) {
+    // SecureStore ishlamaydigan qurilma uchraydi (Keystore buzilgan holatlar) —
+    // seanssiz qoldirgandan ko'ra AsyncStorage'ga yozgan afzal.
+    await SecureStore.setItemAsync(TOKEN_KEY, token, TOKEN_OPTS)
+      .catch(() => AsyncStorage.setItem(TOKEN_KEY, token).catch(() => {}));
+  } else {
+    await SecureStore.deleteItemAsync(TOKEN_KEY).catch(() => {});
+    await AsyncStorage.removeItem(TOKEN_KEY).catch(() => {});
+  }
 }
 
 /**

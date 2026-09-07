@@ -14,14 +14,15 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import {
-  ActivityIndicator, Alert, Modal, Pressable, ScrollView,
+  ActivityIndicator, Keyboard, Modal, Pressable, ScrollView,
   StyleSheet, Text, TextInput, View,
 } from 'react-native';
 import { api } from '../api/client';
 import { search as fuzzySearch } from '../lib/search';
 import { Button } from './ui';
+import { useToast } from './Toast';
 import { Icon } from './Icon';
-import { colors, font, money, radius, shadow, spacing } from '../theme';
+import { colors, elevation, font, money, radius, spacing } from '../theme';
 
 export interface PickedCustomer {
   id: string | null;      // null — yangi mijoz, savdo paytida ochiladi
@@ -41,14 +42,30 @@ export function CustomerPicker({ visible, value, onPick, onClose }: {
   onPick: (c: PickedCustomer | null) => void;
   onClose: () => void;
 }) {
+  const toast = useToast();
   const [all, setAll] = useState<CustomerRow[]>([]);
   const [q, setQ] = useState('');
   /** Yangi mijoz formasi ochiqmi (null — yopiq). */
   const [yangiTel, setYangiTel] = useState<string | null>(null);
   const [saqlanyapti, setSaqlanyapti] = useState(false);
+  /**
+   * Klaviatura balandligi. Modal ichida Android oynani o'zi qisqartirmaydi
+   * (edge-to-edge rejimida adjustResize ishlamaydi), shuning uchun pastdagi
+   * varaqni klaviatura ustiga o'zimiz ko'taramiz — aks holda planshetda
+   * yozilayotgan matn klaviatura ostida ko'rinmay qoladi.
+   */
+  const [kbBalandlik, setKbBalandlik] = useState(0);
 
   useEffect(() => {
-    if (!visible) return;
+    const ochildi = Keyboard.addListener('keyboardDidShow',
+      (e) => setKbBalandlik(e.endCoordinates.height));
+    const yopildi = Keyboard.addListener('keyboardDidHide',
+      () => setKbBalandlik(0));
+    return () => { ochildi.remove(); yopildi.remove(); };
+  }, []);
+
+  useEffect(() => {
+    if (!visible) { setKbBalandlik(0); return; }
     setQ('');
     setYangiTel(null);
     api<CustomerRow[]>('/debts/customers').then(setAll).catch(() => setAll([]));
@@ -68,7 +85,7 @@ export function CustomerPicker({ visible, value, onPick, onClose }: {
       onPick({ id: c.id, name: c.name });
       onClose();
     } catch (e: any) {
-      Alert.alert("Qo'shib bo'lmadi", e.message);
+      toast.xato(`Qo'shib bo'lmadi: ${e.message}`);
     } finally {
       setSaqlanyapti(false);
     }
@@ -85,7 +102,15 @@ export function CustomerPicker({ visible, value, onPick, onClose }: {
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={s.backdrop} onPress={onClose}>
-        <Pressable style={s.sheet} onPress={() => {}}>
+        <Pressable
+          style={[s.sheet, kbBalandlik > 0 && {
+            paddingBottom: kbBalandlik + spacing.md,
+            // Klaviatura ochiq bo'lsa varaqqa ko'proq joy kerak — aks holda
+            // 85% chegara ro'yxatni butunlay siqib qo'yadi.
+            maxHeight: '100%',
+          }]}
+          onPress={() => {}}
+        >
           <View style={s.head}>
             <Text style={[font.h3, { color: colors.text, flex: 1 }]}>Mijoz</Text>
             <Pressable onPress={onClose} hitSlop={10}>
@@ -102,7 +127,10 @@ export function CustomerPicker({ visible, value, onPick, onClose }: {
             autoFocus
           />
 
-          <ScrollView style={{ maxHeight: 320 }} keyboardShouldPersistTaps="handled">
+          <ScrollView
+            style={{ maxHeight: 320, flexShrink: 1 }}
+            keyboardShouldPersistTaps="handled"
+          >
             {value && (
               <Pressable
                 onPress={() => { onPick(null); onClose(); }}
@@ -213,13 +241,13 @@ export function CustomerPicker({ visible, value, onPick, onClose }: {
 
 const s = StyleSheet.create({
   backdrop: {
-    flex: 1, backgroundColor: 'rgba(11,18,32,0.45)', justifyContent: 'flex-end',
+    flex: 1, backgroundColor: colors.scrim, justifyContent: 'flex-end',
   },
   sheet: {
     backgroundColor: colors.surface,
     borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl,
     padding: spacing.xl, paddingBottom: spacing.xxl,
-    gap: spacing.md, maxHeight: '85%', ...shadow,
+    gap: spacing.md, maxHeight: '85%', ...elevation[3],
   },
   head: { flexDirection: 'row', alignItems: 'center' },
   input: {

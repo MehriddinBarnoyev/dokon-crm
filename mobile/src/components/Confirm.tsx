@@ -10,9 +10,11 @@
  */
 import { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Animated, { FadeIn, SlideInDown } from 'react-native-reanimated';
 import { Button } from './ui';
 import { Icon, type IconName } from './Icon';
-import { colors, font, money, radius, shadow, spacing } from '../theme';
+import { colors, elevation, font, money, radius, spacing } from '../theme';
 
 export interface ConfirmRequest {
   /** Nima bo'layotgani: "Savdoni saqlash", "Qarz berish" */
@@ -41,6 +43,7 @@ const Ctx = createContext<((req: ConfirmRequest) => Promise<boolean>) | null>(nu
 export function ConfirmProvider({ children }: { children: React.ReactNode }) {
   const [req, setReq] = useState<ConfirmRequest | null>(null);
   const resolver = useRef<Resolver | null>(null);
+  const insets = useSafeAreaInsets();
 
   const confirm = useCallback((r: ConfirmRequest) => {
     setReq(r);
@@ -62,18 +65,33 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
       <Modal
         visible={req !== null}
         transparent
-        animationType="fade"
+        animationType="none"
+        statusBarTranslucent
         onRequestClose={() => close(false)}
       >
+        <Animated.View entering={FadeIn.duration(160)} style={{ flex: 1 }}>
         <Pressable style={s.backdrop} onPress={() => close(false)}>
           {/* Ichkariga bosilganda yopilmasin */}
-          <Pressable style={s.sheet} onPress={() => {}}>
+          <Animated.View entering={SlideInDown.duration(260).dampingRatio(0.9)}>
+          <Pressable
+            style={[s.sheet, { paddingBottom: spacing.xl + insets.bottom }]}
+            onPress={() => {}}
+          >
             {req && (
               <>
+                {/* Tutqich — varaqning pastdan chiqqanini bildiradi */}
+                <View style={s.grip} />
+
                 <View style={s.head}>
                   {req.icon ? (
-                    <View style={s.iconWrap}>
-                      <Icon name={req.icon} size={20} color={colors.primary} />
+                    <View style={[
+                      s.iconWrap,
+                      req.destructive ? { backgroundColor: colors.dangerSoft } : null,
+                    ]}>
+                      <Icon
+                        name={req.icon} size={20}
+                        color={req.destructive ? colors.danger : colors.primary}
+                      />
                     </View>
                   ) : null}
                   <Text style={[font.h3, { color: colors.text, flex: 1 }]}>
@@ -86,8 +104,8 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
                     <Text style={[font.small, { color: colors.textMuted }]}>
                       {req.amountLabel ?? 'Jami'}
                     </Text>
-                    <Text style={[font.h1, { color: colors.text }]}>
-                      {money(req.amount)} <Text style={font.h3}>so'm</Text>
+                    <Text style={[font.numBig, { color: colors.text }]}>
+                      {money(req.amount)} <Text style={[font.h3, { color: colors.textMuted }]}>so'm</Text>
                     </Text>
                   </View>
                 )}
@@ -96,9 +114,12 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
                   <ScrollView style={{ maxHeight: 220 }} bounces={false}>
                     <View style={s.lines}>
                       {req.lines.map((l, i) => (
-                        <Text key={i} style={[font.small, { color: colors.textMuted }]}>
-                          {l}
-                        </Text>
+                        <View key={i} style={s.lineRow}>
+                          <View style={s.bullet} />
+                          <Text style={[font.small, { color: colors.textMuted, flex: 1 }]}>
+                            {l}
+                          </Text>
+                        </View>
                       ))}
                     </View>
                   </ScrollView>
@@ -130,7 +151,9 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
               </>
             )}
           </Pressable>
+          </Animated.View>
         </Pressable>
+        </Animated.View>
       </Modal>
     </Ctx.Provider>
   );
@@ -148,17 +171,21 @@ export function useConfirm() {
 const s = StyleSheet.create({
   backdrop: {
     flex: 1,
-    backgroundColor: 'rgba(11,18,32,0.45)',
+    backgroundColor: colors.scrim,
     justifyContent: 'flex-end',
   },
   sheet: {
     backgroundColor: colors.surface,
-    borderTopLeftRadius: radius.xl,
-    borderTopRightRadius: radius.xl,
+    borderTopLeftRadius: radius.xxl,
+    borderTopRightRadius: radius.xxl,
     padding: spacing.xl,
-    paddingBottom: spacing.xxl,
     gap: spacing.md,
-    ...shadow,
+    ...elevation[3],
+  },
+  grip: {
+    width: 40, height: 4, borderRadius: 2,
+    backgroundColor: colors.border,
+    alignSelf: 'center', marginBottom: spacing.xs,
   },
   head: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   iconWrap: {
@@ -172,7 +199,12 @@ const s = StyleSheet.create({
     padding: spacing.lg,
     gap: 2,
   },
-  lines: { gap: 4 },
+  lines: { gap: 7 },
+  lineRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  bullet: {
+    width: 4, height: 4, borderRadius: 2,
+    backgroundColor: colors.borderStrong,
+  },
   warn: {
     backgroundColor: colors.warningSoft,
     borderRadius: radius.md,

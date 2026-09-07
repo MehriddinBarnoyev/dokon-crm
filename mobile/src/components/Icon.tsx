@@ -47,7 +47,15 @@ const ICONS = {
   galereya:   ion('images-outline'),
   telefon:    ion('call-outline'),
   qidiruv:    ion('search-outline'),
-  sozlash:    ion('construct-outline'),
+  sozlash:    ion('options-outline'),
+  sozlamalar: ion('settings-outline'),
+  chiqish:    ion('log-out-outline'),
+  tasdiq:     ion('checkmark-circle'),
+  belgi:      ion('checkmark'),
+  ulash:      ion('share-outline'),
+  yangilash:  ion('refresh-outline'),
+  kalendar:   ion('calendar-outline'),
+  foydalanuvchi: ion('person-outline'),
 
   /* --- Tushunchalar --- */
   ai:            mat('robot-outline'),
@@ -62,6 +70,12 @@ const ICONS = {
   'kirim-qutisi': ion('download-outline'),
   'chiqim-grafik': ion('trending-down-outline'),
   qarz:          mat('handshake-outline'),
+  'ombor-qiymat': mat('package-variant-closed'),
+  yulduz:        ion('sparkles-outline'),
+  osish:         ion('trending-up-outline'),
+  pasayish:      ion('trending-down-outline'),
+  qulf:          ion('lock-closed-outline'),
+  shield:        ion('shield-checkmark-outline'),
 } as const;
 
 export type IconName = keyof typeof ICONS;

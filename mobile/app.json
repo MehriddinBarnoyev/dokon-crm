@@ -2,7 +2,7 @@
   "expo": {
     "name": "Do'kon CRM",
     "slug": "dokon-crm",
-    "version": "1.0.0",
+    "version": "1.6.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -22,6 +22,7 @@
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
+      "versionCode": 7,
       "predictiveBackGestureEnabled": false,
       "edgeToEdgeEnabled": true,
       "package": "uz.dokoncrm.app"
@@ -44,7 +45,8 @@
           "photosPermission": "Mahsulot rasmini galereyadan tanlash uchun ruxsat bering.",
           "cameraPermission": "Mahsulotni rasmga olish uchun kameraga ruxsat bering."
         }
-      ]
+      ],
+      "expo-secure-store"
     ],
     "scheme": "dokoncrm",
     "experiments": {
