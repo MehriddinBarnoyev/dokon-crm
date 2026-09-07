@@ -71,6 +71,18 @@ check("noto'g'ri parol rad etiladi", st == 401)
 me, _ = call("/auth/me")
 check("/auth/me do'konni qaytaradi", me.get("shop", {}).get("name") == "Baraka Do'koni")
 
+# Raqam qaysi shaklda yozilsa ham bitta hisobga tushadi: ilova endi
+# `+998...` yuboradi, lekin eski hisoblar bazada boshqacha yotibdi.
+for shakl in ("901234567", "998901234567", "998 90 123 45 67", "+998 90 123 45 67"):
+    r, st2 = call("/auth/login", "POST", {"phone": shakl, "password": "1234"})
+    check(f"telefon shakli: {shakl}", st2 == 200 and "token" in r)
+
+r, st2 = call("/auth/register", "POST", {
+    "shop_name": "Sinov", "name": "Sinov", "phone": "12345", "password": "1234"})
+check("chala raqam bilan ro'yxatdan o'tib bo'lmaydi", st2 == 400)
+r, st2 = call("/auth/login", "POST", {"phone": "123456", "password": "1234"})
+check("chala raqamli kirish 401 beradi (400 emas)", st2 == 401)
+
 # --- Savdo ombordan ayiradi ---
 print("\n2. Savdo → ombor kamayadi, kirim ortadi")
 prods, _ = call("/products?search=Kartoshka")
@@ -202,6 +214,42 @@ if topilgan:
           f"{float(det['jami']['jami_xarid']):,.0f} so'm")
     check("naqd xaridda qarz yo'q", float(det["balance"]) == 0,
           f"balans {det['balance']}")
+
+    # Mijoz sahifasi bo'laklab tortiladi: birinchi javobda xaridlar YO'Q,
+    # faqat yig'indisi. Mahsulotlar alohida so'rov bilan keladi.
+    check("birinchi javobda xaridlar ro'yxati yo'q", "purchases" not in det)
+    check("tarix sahifa ko'rinishida keladi",
+          isinstance(det.get("history"), dict) and "items" in det["history"])
+
+    cid = topilgan[0]["customer_id"]
+    xar, st = call(f"/debts/customer/{cid}/purchases")
+    check("xaridlar alohida tortiladi", st == 200 and len(xar["items"]) == 2,
+          f"{len(xar.get('items', []))} ta")
+    qatorlar = [q for x in xar["items"] for q in (x["items"] or [])]
+    check("har qatorda miqdor va narx bor",
+          bool(qatorlar) and all(
+              q.get("qty") and q.get("unit") and q.get("unit_price") and q.get("subtotal")
+              for q in qatorlar),
+          f"{len(qatorlar)} ta qator")
+    check("qator summasi miqdor × narxga teng",
+          all(abs(float(q["subtotal"]) - float(q["qty"]) * float(q["unit_price"])) < 1
+              for q in qatorlar))
+
+    buzuq, st = call(f"/debts/customer/{cid}/history?before=buzuq")
+    check("buzuq kursor xato bermaydi", st == 200)
+
+# Sahifalash — qarz tarixi bor mijozda (yuqorida qarz ham, to'lov ham yozilgan).
+qcid = sinov[0]["customer_id"]
+qdet, _ = call(f"/debts/customer/{qcid}")
+qtarix = qdet["history"]["items"]
+check("qarz tarixi keldi", len(qtarix) >= 2, f"{len(qtarix)} ta yozuv")
+if len(qtarix) >= 2:
+    kur = urllib.parse.quote(f"{qtarix[0]['created_at']}|{qtarix[0]['id']}")
+    keyin, _ = call(f"/debts/customer/{qcid}/history?before={kur}")
+    korilgan = [x["id"] for x in keyin["items"]]
+    check("kursor faqat keyingilarini qaytaradi",
+          korilgan == [x["id"] for x in qtarix[1:]],
+          f"{len(korilgan)} ta")
 
 # --- Aqlli qidiruv ---
 print("\n10. Aqlli qidiruv (xato yozilgan / ko'p so'zli nomlar)")

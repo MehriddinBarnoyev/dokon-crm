@@ -20,12 +20,13 @@ export default async function reportRoutes(app: FastifyInstance) {
               COALESCE(net_profit,0)  AS net_profit,
               COALESCE(sales_count,0) AS sales_count,
               COALESCE(credit_total,0)  AS credit_total,
-              COALESCE(credit_profit,0) AS credit_profit
+              COALESCE(credit_profit,0) AS credit_profit,
+              COALESCE(debt_given,0)  AS debt_given
          FROM daily_summary
         WHERE shop_id = $1
           AND day = (now() AT TIME ZONE 'Asia/Tashkent')::date`, [shop])
       ?? { sales_total: 0, cash_in: 0, expense_total: 0, net_profit: 0,
-           sales_count: 0, credit_total: 0, credit_profit: 0 };
+           sales_count: 0, credit_total: 0, credit_profit: 0, debt_given: 0 };
 
     const [debts, lowStock, week] = await Promise.all([
       one(`SELECT COALESCE(SUM(balance),0) AS total_owed,
@@ -91,7 +92,8 @@ export default async function reportRoutes(app: FastifyInstance) {
                   COALESCE(net_profit,0)    AS net_profit,
                   COALESCE(sales_count,0)   AS sales_count,
                   COALESCE(credit_total,0)  AS credit_total,
-                  COALESCE(credit_profit,0) AS credit_profit
+                  COALESCE(credit_profit,0) AS credit_profit,
+                  COALESCE(debt_given,0)    AS debt_given
              FROM daily_summary WHERE shop_id = $2 AND day = $1::date`, [date, shop]),
 
       query(`SELECT s.id, s.total, s.paid, s.cost_total, s.payment_method,

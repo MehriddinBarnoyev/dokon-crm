@@ -104,6 +104,9 @@ CREATE TABLE IF NOT EXISTS sales (
   created_at     timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS sales_shop_date_idx ON sales(shop_id, created_at DESC);
+-- Mijoz sahifasidagi "Xaridlari" bo'limi shu bo'yicha sahifalab o'qiydi.
+CREATE INDEX IF NOT EXISTS sales_customer_idx  ON sales(customer_id, created_at DESC)
+  WHERE customer_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS sale_items (
   id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -286,16 +289,29 @@ WITH s AS (
   SELECT shop_id, (created_at AT TIME ZONE 'Asia/Tashkent')::date AS d,
          SUM(-amount) AS debt_paid          -- to'langan qarz = kirim
   FROM debts WHERE amount < 0 GROUP BY 1, 2
+), q AS (
+  -- Qo'lda yozilgan qarz: savdoga bog'lanmagani (`sale_id IS NULL`).
+  -- Savdodan chiqqan qarz `credit_total` da allaqachon bor, ikki marta
+  -- sanalmasin.
+  SELECT shop_id, (created_at AT TIME ZONE 'Asia/Tashkent')::date AS d,
+         SUM(amount) AS debt_given
+  FROM debts WHERE amount > 0 AND sale_id IS NULL GROUP BY 1, 2
 )
-SELECT COALESCE(s.shop_id, e.shop_id, p.shop_id) AS shop_id,
-       COALESCE(s.d, e.d, p.d)                   AS day,
+SELECT COALESCE(s.shop_id, e.shop_id, p.shop_id, q.shop_id) AS shop_id,
+       COALESCE(s.d, e.d, p.d, q.d)                         AS day,
        COALESCE(s.sales_total, 0)                AS sales_total,
        COALESCE(s.cash_in, 0) + COALESCE(p.debt_paid, 0) AS cash_in,
        COALESCE(e.expense_total, 0)              AS expense_total,
        COALESCE(s.gross_profit, 0) - COALESCE(e.expense_total, 0) AS net_profit,
        COALESCE(s.sales_count, 0)                AS sales_count,
        COALESCE(s.credit_total, 0)               AS credit_total,
-       COALESCE(s.credit_profit, 0)              AS credit_profit
+       COALESCE(s.credit_profit, 0)              AS credit_profit,
+       -- Qo'lda berilgan qarz. Tushum va foydaga ta'sir qilmaydi (mol
+       -- chiqmagan, tannarx yo'q) — lekin do'konchi kuni bilan qancha
+       -- qarz tarqatganini ko'rishi kerak.
+       COALESCE(q.debt_given, 0)                 AS debt_given
 FROM s FULL JOIN e ON s.shop_id = e.shop_id AND s.d = e.d
        FULL JOIN p ON COALESCE(s.shop_id, e.shop_id) = p.shop_id
-                  AND COALESCE(s.d, e.d) = p.d;
+                  AND COALESCE(s.d, e.d) = p.d
+       FULL JOIN q ON COALESCE(s.shop_id, e.shop_id, p.shop_id) = q.shop_id
+                  AND COALESCE(s.d, e.d, p.d) = q.d;

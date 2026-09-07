@@ -3,11 +3,32 @@ import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import { one, tx } from '../db.js';
 import { requireAuth } from '../lib/auth.js';
+import { KOD, SQL_TEL_MOS, SQL_TEL_TARTIB, XONA, telMilliy, telNormal } from '../lib/telefon.js';
+
+/**
+ * Yangi hisob uchun raqam to'liq bo'lishi shart — 9 xona.
+ *
+ * Kirishda bu tekshiruv YO'Q: u yerda yarim raqam "Login yoki parol xato"
+ * bo'lib qaytishi kerak, "ma'lumot noto'g'ri" emas. Aks holda mavjud bo'lgan
+ * va bo'lmagan hisoblar bir-biridan ajralib qolardi.
+ */
+const YangiTel = z.string().transform(telNormal)
+  .refine((v) => v.length === KOD.length + XONA,
+          { message: "Telefon raqami to'liq emas — 9 xona kerak" });
+
+/**
+ * Raqam bo'yicha hisob qidirish.
+ *
+ * Ikki yo'lli taqqoslash kerak: ilova endi `+998901234567` yuboradi, lekin
+ * bazada eski shakldagi qatorlar ham bor. Batafsil — `lib/telefon.ts`.
+ */
+const TOPISH = (ustunlar: string) =>
+  `SELECT ${ustunlar} FROM users WHERE ${SQL_TEL_MOS(1)} ${SQL_TEL_TARTIB(1)} LIMIT 1`;
 
 const RegisterBody = z.object({
   shop_name: z.string().min(2),
   name: z.string().min(2),
-  phone: z.string().min(6),
+  phone: YangiTel,
   password: z.string().min(4),
 });
 
@@ -20,7 +41,11 @@ export default async function authRoutes(app: FastifyInstance) {
   app.post('/register', async (req, reply) => {
     const body = RegisterBody.parse(req.body);
 
-    const exists = await one(`SELECT id FROM users WHERE phone = $1`, [body.phone]);
+    // `body.phone` — YangiTel normallashtirib bergan `+998...`. Band-emaslik
+    // ham shu bo'yicha tekshiriladi: aks holda "998901234567" bilan
+    // ro'yxatdan o'tgan odam "+998901234567" yozib, ikkinchi do'kon ocha
+    // olardi va eski hisobiga boshqa kira olmasdi.
+    const exists = await one(TOPISH('id'), [body.phone, telMilliy(body.phone)]);
     if (exists) return reply.code(409).send({ error: 'Bu telefon raqami band' });
 
     const hash = await bcrypt.hash(body.password, 10);
@@ -40,11 +65,12 @@ export default async function authRoutes(app: FastifyInstance) {
 
   app.post('/login', async (req, reply) => {
     const body = LoginBody.parse(req.body);
+    const phone = telNormal(body.phone);
     const row = await one<{
       id: string; shop_id: string; role: 'owner' | 'seller';
       name: string; password_hash: string; is_active: boolean;
-    }>(`SELECT id, shop_id, role, name, password_hash, is_active
-          FROM users WHERE phone = $1`, [body.phone]);
+    }>(TOPISH('id, shop_id, role, name, password_hash, is_active'),
+       [phone, telMilliy(phone)]);
 
     if (!row || !row.is_active) return reply.code(401).send({ error: 'Login yoki parol xato' });
     if (!(await bcrypt.compare(body.password, row.password_hash))) {
@@ -60,10 +86,11 @@ export default async function authRoutes(app: FastifyInstance) {
       return reply.code(403).send({ error: 'Faqat do\'kon egasi xodim qo\'sha oladi' });
     }
     const body = z.object({
-      name: z.string().min(2), phone: z.string().min(6), password: z.string().min(4),
+      name: z.string().min(2), phone: YangiTel, password: z.string().min(4),
     }).parse(req.body);
 
-    const exists = await one(`SELECT id FROM users WHERE phone = $1`, [body.phone]);
+    // Xodim ham bitta ko'rinishda yoziladi — u ham shu raqam bilan kiradi.
+    const exists = await one(TOPISH('id'), [body.phone, telMilliy(body.phone)]);
     if (exists) return reply.code(409).send({ error: 'Bu telefon raqami band' });
 
     const hash = await bcrypt.hash(body.password, 10);
