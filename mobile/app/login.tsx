@@ -3,7 +3,8 @@ import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } fr
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, { FadeInDown, FadeIn } from 'react-native-reanimated';
 import { useAuth } from '../src/api/auth';
-import { Button, Field } from '../src/components/ui';
+import { Button, Field, PhoneField } from '../src/components/ui';
+import * as tel from '../src/lib/telefon';
 import { useToast } from '../src/components/Toast';
 import { colors, elevation, font, radius, spacing } from '../src/theme';
 import { BASE_URL } from '../src/api/client';
@@ -15,9 +16,12 @@ export default function LoginScreen() {
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [busy, setBusy] = useState(false);
 
+  // `phone` — FAQAT milliy 9 xona. `+998` maydonda o'zgarmas prefiks
+  // bo'lib turadi va serverga yuborishdan oldin `tel.toliq()` qo'shadi.
+  //
   // Ishlab chiqishda har safar qo'lda yozmaslik uchun — tayyor hisob.
   // Chiqarilgan ilovada maydonlar bo'sh keladi.
-  const [phone, setPhone] = useState(__DEV__ ? '+998901234567' : '');
+  const [phone, setPhone] = useState(__DEV__ ? '901234567' : '');
   const [password, setPassword] = useState(__DEV__ ? '1234' : '');
   const [name, setName] = useState('');
   const [shopName, setShopName] = useState('');
@@ -25,20 +29,28 @@ export default function LoginScreen() {
   const kirish = mode === 'login';
 
   async function submit() {
-    if (!phone.trim() || !password) {
+    if (!phone || !password) {
       toast.ogoh('Telefon va parolni kiriting');
+      return;
+    }
+    // Yarim raqamni serverga umuman yubormaymiz: javob "Login yoki parol
+    // xato" bo'lib kelardi va do'konchi parolini qayta-qayta terib
+    // ko'rardi, aslida raqam kam edi.
+    if (!tel.toliqmi(phone)) {
+      toast.ogoh(`Telefon raqami to'liq emas — ${tel.XONA} xona kerak`);
       return;
     }
     setBusy(true);
     try {
+      const raqam = tel.toliq(phone);
       if (kirish) {
-        await login(phone.trim(), password);
+        await login(raqam, password);
       } else {
         if (!shopName.trim() || !name.trim()) {
           toast.ogoh("Do'kon nomi va ismingizni kiriting");
           return;
         }
-        await register(shopName.trim(), name.trim(), phone.trim(), password);
+        await register(shopName.trim(), name.trim(), raqam, password);
       }
     } catch (e: any) {
       toast.xato(e.message);
@@ -99,15 +111,7 @@ export default function LoginScreen() {
                 </>
               )}
 
-              <Field
-                label="TELEFON"
-                placeholder="+998 90 123 45 67"
-                value={phone}
-                onChangeText={setPhone}
-                keyboardType="phone-pad"
-                autoCapitalize="none"
-                autoComplete="tel"
-              />
+              <PhoneField value={phone} onChangeText={setPhone} />
               <Field
                 label="PAROL"
                 placeholder="••••"

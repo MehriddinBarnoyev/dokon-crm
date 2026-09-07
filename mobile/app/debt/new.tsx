@@ -16,6 +16,16 @@
  * kiritiladi. Bu faqat tarix tartibi va muddat uchun — musbat qarz kunlik
  * tushum yoki foydaga umuman qo'shilmaydi.
  *
+ * BIRINCHI QADAM — TANLOV. Ekran darhol formani ochmaydi, avval "mol
+ * berdimmi yoki pulmi?" deb so'raydi. Nega? Bu sahifa faqat QARZLAR
+ * ro'yxatiga yozadi: ombordan mahsulot kamaymaydi va foyda hisoblanmaydi.
+ * Mol qarzga berilganda esa ikkalasi ham bo'lishi shart. Do'konchi buni
+ * bilmasdan shu sahifadan yozsa, kunlik hisob jimgina noto'g'ri chiqadi —
+ * savdo ko'rinmaydi, ombor haqiqatdan ko'p ko'rsatadi.
+ *
+ * Shuning uchun "Mol berdim" tanlansa Savdo ekraniga o'tkazamiz: u yerda
+ * to'lov turi "qarz" bo'ladi va qarz o'zi avtomatik ochiladi.
+ *
  * OFFLINE. Yozuv navbat (outbox) orqali ketadi: internet yo'q bo'lsa ham
  * daftarni ko'chirishda davom etish mumkin.
  */
@@ -34,55 +44,13 @@ import { Icon } from '../../src/components/Icon';
 import { useConfirm } from '../../src/components/Confirm';
 import { useToast } from '../../src/components/Toast';
 import { useKeyboardHeight } from '../../src/lib/keyboard';
+import { sanaOqi, qoshKun } from '../../src/lib/sana';
 import {
   colors, font, kunKaliti, money, radius, sanaMatni, spacing,
 } from '../../src/theme';
 
 /** Shu summadan yuqorisi tasdiq so'raydi — nol adashib qo'shilishi oson. */
 const TASDIQ_CHEGARASI = 1_000_000;
-
-/* --------------------------------- Sana --------------------------------- */
-
-function tekshir(yil: number, oy: number, kun: number): string | null {
-  const d = new Date(yil, oy - 1, kun);
-  // Sana "mavjudmi": 31.02 → 3-mart bo'lib ketadi, uni qabul qilmaymiz.
-  if (d.getFullYear() !== yil || d.getMonth() !== oy - 1 || d.getDate() !== kun) return null;
-  return kunKaliti(d);
-}
-
-/**
- * Do'konchi yozadigan sana → "YYYY-MM-DD".
- *
- * Qabul qilinadi: "15.08", "15.08.2026", "15/8/26", "15-8", "2026-08-15",
- * shuningdek nuqtasiz "1508" va "15082026".
- *
- * Nuqtasiz variant ataylab: Android raqam klaviaturasida nuqta har doim
- * ham bo'lavermaydi, do'konchi esa klaviatura almashtirib o'tirmasligi kerak.
- *
- * Yil yozilmasa joriy yil olinadi — daftar ko'chirishda ko'pincha shunday.
- */
-export function sanaOqi(matn: string): string | null {
-  const t = matn.trim();
-  if (!t) return null;
-
-  const iso = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(t);
-  if (iso) return tekshir(+iso[1], +iso[2], +iso[3]);
-
-  const m = /^(\d{1,2})[./-](\d{1,2})(?:[./-](\d{2}|\d{4}))?$/.exec(t)
-    // kkoo / kkooyy / kkooyyyy
-    ?? /^(\d{2})(\d{2})(\d{4}|\d{2})?$/.exec(t);
-  if (!m) return null;
-
-  let yil = m[3] ? Number(m[3]) : new Date().getFullYear();
-  if (yil < 100) yil += 2000;
-  return tekshir(yil, Number(m[2]), Number(m[1]));
-}
-
-/** "2026-08-15" + 7 kun → "2026-08-22". */
-function qoshKun(iso: string, kun: number): string {
-  const [y, o, k] = iso.split('-').map(Number);
-  return kunKaliti(new Date(y, o - 1, k + kun));
-}
 
 /* -------------------------------- Ekran --------------------------------- */
 
@@ -104,6 +72,8 @@ export default function NewDebtScreen() {
   const kb = useKeyboardHeight();
   const amountRef = useRef<TextInput>(null);
 
+  /** Tanlov qilinmaguncha forma ko'rsatilmaydi. */
+  const [pulQarz, setPulQarz] = useState(false);
   const [customer, setCustomer] = useState<PickedCustomer | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [amount, setAmount] = useState('');
@@ -233,6 +203,61 @@ export default function NewDebtScreen() {
   }
 
   const hozirgiQarz = customer?.id ? (balans[customer.id] ?? 0) : 0;
+
+  if (!pulQarz) {
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={['top']}>
+        <ModalHeader title="Qarz qo'shish" onClose={() => router.back()} />
+        <View style={s.tanlov}>
+          <Text style={[font.small, { color: colors.textMuted }]}>
+            Qarz nimadan paydo bo'ldi?
+          </Text>
+
+          <PressScale
+            accessibilityRole="button"
+            accessibilityLabel="Mol berdim — savdo ekraniga o'tish"
+            onPress={() => router.replace('/sale/new')}
+            scale={0.99}
+            style={s.yol}
+          >
+            <View style={[s.yolIkon, { backgroundColor: colors.primarySoft }]}>
+              <Icon name="savat" size={20} color={colors.primary} />
+            </View>
+            <View style={{ flex: 1, gap: 2 }}>
+              <Text style={[font.bodyBold, { color: colors.text }]}>Mol berdim</Text>
+              <Text style={[font.tiny, { color: colors.textMuted }]}>
+                Mahsulot qarzga berildi. Savdo ekranidan yoziladi: ombordan
+                kamayadi, foyda kunlik hisobga tushadi, qarz o'zi ochiladi.
+              </Text>
+            </View>
+            <Icon name="oldinga" size={16} color={colors.textMuted} />
+          </PressScale>
+
+          <PressScale
+            accessibilityRole="button"
+            accessibilityLabel="Pul qarz berdim yoki eski daftar"
+            onPress={() => setPulQarz(true)}
+            scale={0.99}
+            style={s.yol}
+          >
+            <View style={[s.yolIkon, { backgroundColor: colors.warningSoft }]}>
+              <Icon name="pul" size={20} color={colors.warning} />
+            </View>
+            <View style={{ flex: 1, gap: 2 }}>
+              <Text style={[font.bodyBold, { color: colors.text }]}>
+                Pul qarz berdim yoki eski daftar
+              </Text>
+              <Text style={[font.tiny, { color: colors.textMuted }]}>
+                Mol chiqmagan. Faqat qarzlar ro'yxatiga yoziladi — kunlik
+                tushum va foydaga kirmaydi.
+              </Text>
+            </View>
+            <Icon name="oldinga" size={16} color={colors.textMuted} />
+          </PressScale>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={['top']}>
@@ -390,6 +415,17 @@ export default function NewDebtScreen() {
 
 const s = StyleSheet.create({
   scroll: { padding: spacing.lg, paddingTop: 0, gap: spacing.md },
+  tanlov: { padding: spacing.lg, paddingTop: 0, gap: spacing.md },
+  yol: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.md,
+    backgroundColor: colors.surface, borderRadius: radius.lg,
+    borderWidth: 1, borderColor: colors.borderSoft,
+    padding: spacing.md,
+  },
+  yolIkon: {
+    width: 40, height: 40, borderRadius: radius.md,
+    alignItems: 'center', justifyContent: 'center',
+  },
   izoh: {
     flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm,
     backgroundColor: colors.primarySoft, borderRadius: radius.md,

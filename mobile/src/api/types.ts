@@ -35,6 +35,43 @@ export interface DebtEntry {
   note: string | null; created_at: string; sale_id: string | null; user_name: string | null;
 }
 
+/**
+ * Kursor bilan sahifalangan ro'yxat. `next` — keyingi sahifa uchun
+ * `?before=` qiymati; `null` bo'lsa ro'yxat tugagan va "Yana" ko'rsatilmaydi.
+ */
+export interface Sahifa<T> { items: T[]; next: string | null }
+
+/** Xaridning bitta qatori — nima, qancha, qaysi narxda. */
+export interface XaridQatori {
+  name: string; qty: number; unit: Unit; unit_price: number; subtotal: number;
+}
+
+/** `GET /debts/customer/:id/purchases` */
+export interface Xarid {
+  id: string; total: number; paid: number;
+  payment_method: PaymentMethod; created_at: string;
+  items: XaridQatori[] | null;
+}
+
+/**
+ * `GET /debts/customer/:id` — mijoz sahifasining birinchi so'rovi.
+ * Xaridlar ro'yxati bu yerda YO'Q: undan faqat yig'indi (`jami`) keladi,
+ * mahsulotlar bo'lim ochilganda alohida tortiladi.
+ */
+export interface CustomerDebt {
+  customer_id: string; name: string; phone: string | null;
+  balance: number; nearest_due: string | null;
+  history: Sahifa<DebtEntry> | DebtEntry[];
+  jami?: { xaridlar_soni: number; jami_xarid: number; oxirgi_xarid: string | null };
+  /**
+   * ESKI SERVER (1.9.0 gacha) shu javobning o'zida xaridlarni ham
+   * yuborardi va `history` ni sahifa emas, oddiy massiv qilib qaytarardi.
+   * Ilova do'kondagi telefonda serverdan oldin yangilanishi mumkin —
+   * shuning uchun ikkala shakl ham tushuniladi.
+   */
+  purchases?: Xarid[];
+}
+
 export interface Expense {
   id: string; category: string; amount: number; note: string | null;
   source: string; created_at: string; updated_at: string;
@@ -52,6 +89,11 @@ export interface Dashboard {
     credit_total: number;
     /** `net_profit` ichidagi qarzda qolgan ulush — hali qo'lga tushmagan foyda */
     credit_profit: number;
+    /**
+     * Qo'lda yozilgan qarz (savdodan chiqmagani). Tushum va foydaga
+     * kirmaydi — mol chiqmagan, tannarx yo'q.
+     */
+    debt_given: number;
   };
   debts: { total_owed: number; debtor_count: number; overdue_count: number };
   low_stock: Array<{ id: string; name: string; stock: number; min_stock: number; unit: Unit }>;

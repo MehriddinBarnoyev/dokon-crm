@@ -41,6 +41,8 @@ const ICONS = {
   yuborish:   ion('arrow-up'),
   orqaga:     ion('chevron-back'),
   oldinga:    ion('chevron-forward'),
+  pastga:     ion('chevron-down'),
+  yuqoriga:   ion('chevron-up'),
   kamera:     ion('camera-outline'),
   shtrix:     ion('barcode-outline'),
   tahrir:     ion('create-outline'),

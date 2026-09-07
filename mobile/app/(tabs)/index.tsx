@@ -119,7 +119,12 @@ export default function HomeScreen() {
           </View>
         ) : null}
 
-        {t && (
+        {t && (() => {
+          // Savdodan chiqqan qarz + qo'lda yozilgani.
+          // `?? 0` — eski server hali `debt_given` qaytarmasligi mumkin;
+          // busiz NaN chiqib, butun qator jimgina yo'qolardi.
+          const qarzgaBerildi = Number(t.credit_total) + Number(t.debt_given ?? 0);
+          return (
           <>
             {/* Bugungi asosiy raqam */}
             <Animated.View entering={FadeInDown.duration(280)}>
@@ -160,25 +165,50 @@ export default function HomeScreen() {
                 {/* Foyda bor, lekin pul hali kelmagan — do'kondagi eng ko'p
                     uchraydigan tuzoq. "Sof foyda" raqamining ostida shuni
                     ochiq aytamiz, aks holda kassadagi pul bilan hisobdagi
-                    foyda nega bir xil emasligi tushunarsiz bo'lib qoladi. */}
-                {Number(t.credit_profit) > 0 && (
+                    foyda nega bir xil emasligi tushunarsiz bo'lib qoladi.
+
+                    Qarzning ikki manbasi bor va ikkalasi ham shu qatorda
+                    ko'rinadi: savdodan chiqqani (`credit_total`) va qo'lda
+                    yozilgani (`debt_given`). Ilgari faqat birinchisi
+                    ko'rinardi — qo'lda yozilgan qarz hech qayerda
+                    chiqmagani uchun "yozdim, lekin hech narsa o'zgarmadi"
+                    degan taassurot tug'dirardi. */}
+                {qarzgaBerildi > 0 && (
                   <View style={s.qarzIzoh}>
                     <Icon name="qarzlar" size={14} color={colors.warning} />
                     <Text style={[font.tiny, { color: colors.warning, flex: 1 }]}>
-                      Foydaning {money(t.credit_profit)} so'mi hali qo'lga tushmagan
-                      {' — '}bugun {money(t.credit_total)} so'm qarzga berildi
+                      Bugun {money(qarzgaBerildi)} so'm qarzga berildi
+                      {Number(t.credit_profit) > 0
+                        ? ` — foydaning ${money(t.credit_profit)} so'mi hali qo'lga tushmagan`
+                        : " — bu summa tushum va foydaga kirmaydi"}
                     </Text>
                   </View>
                 )}
 
+                {/* Ikki qator: eng ko'p bosiladigan "Yangi savdo" butun
+                    kenglikni oladi, qolgan ikkitasi ostida yonma-yon.
+                    Uchalasi bitta qatorga sig'dirilsa tor telefonda matn
+                    qirqilardi (`numberOfLines={1}`).
+
+                    "Chiqim" ilgari bu yerda yo'q edi: uni qo'shish uchun
+                    yuqoridagi qizil raqamni bosish kerak edi, lekin u
+                    tugmaga o'xshamaydi — natijada chiqim yozish ikki qadam
+                    orqasida yashiringan edi. Rangi ham o'sha raqamniki
+                    bilan bir xil: qizil = kassadan chiqqan pul. */}
                 <View style={s.actions}>
                   <Button
-                    title="Yangi savdo" icon="qoshish" style={{ flex: 3 }}
+                    title="Yangi savdo" icon="qoshish" style={{ flex: 1 }}
                     onPress={() => router.push('/sale/new')}
                   />
+                </View>
+                <View style={s.actionsIkkinchi}>
                   <Button
-                    title="Mahsulot" icon="mahsulot" variant="soft" style={{ flex: 2 }}
+                    title="Mahsulot" icon="mahsulot" variant="soft" style={{ flex: 1 }}
                     onPress={() => router.push('/product/new')}
+                  />
+                  <Button
+                    title="Chiqim" icon="chiqim" variant="danger" style={{ flex: 1 }}
+                    onPress={() => router.push('/expense/new')}
                   />
                 </View>
 
@@ -285,7 +315,8 @@ export default function HomeScreen() {
               </Animated.View>
             )}
           </>
-        )}
+          );
+        })()}
       </ScrollView>
     </SafeAreaView>
   );
@@ -323,6 +354,7 @@ const s = StyleSheet.create({
     paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
   },
   actions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.lg },
+  actionsIkkinchi: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm },
   rowBetween: {
     flexDirection: 'row', alignItems: 'center',
     justifyContent: 'space-between', gap: spacing.md,

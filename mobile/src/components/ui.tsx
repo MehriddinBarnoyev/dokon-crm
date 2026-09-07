@@ -7,6 +7,7 @@ import { colors, elevation, font, radius, spacing, HIT } from '../theme';
 import { Icon, type IconName } from './Icon';
 import { PressScale } from './Press';
 import { haptic } from '../lib/haptics';
+import * as tel from '../lib/telefon';
 
 /* --------------------------------- Karta -------------------------------- */
 
@@ -147,10 +148,12 @@ export function IconButton({
  * Maydonning o'ziga uslub kerak bo'lsa `inputStyle` ishlatiladi.
  */
 export function Field({
-  label, hint, error, style, inputStyle, inputRef, suffix, ...props
+  label, hint, error, style, inputStyle, inputRef, prefix, suffix, ...props
 }: Omit<TextInputProps, 'style'> & {
   label?: string; hint?: string; error?: string;
   style?: StyleProp<ViewStyle>; inputStyle?: TextInputProps['style'];
+  /** Chap chekkadagi doimiy matn: "+998". Yozib bo'lmaydi, o'chib ham ketmaydi. */
+  prefix?: string;
   /** O'ng chekkadagi doimiy matn: "so'm", "dona". */
   suffix?: string;
   /** Fokusni tashqaridan boshqarish uchun (masalan, saqlab bo'lgach nomga qaytish). */
@@ -167,13 +170,16 @@ export function Field({
         focused ? s.inputBoxOn : null,
         error ? { borderColor: colors.danger, backgroundColor: colors.dangerSoft } : null,
       ]}>
+        {prefix ? (
+          <Text style={[font.body, s.prefix, { color: colors.textMuted }]}>{prefix}</Text>
+        ) : null}
         <TextInput
           ref={inputRef}
           placeholderTextColor={colors.textFaint}
           {...props}
           onFocus={(e) => { setFocused(true); props.onFocus?.(e); }}
           onBlur={(e) => { setFocused(false); props.onBlur?.(e); }}
-          style={[s.input, inputStyle]}
+          style={[s.input, prefix ? { paddingLeft: spacing.xs } : null, inputStyle]}
         />
         {suffix ? (
           <Text style={[font.small, { color: colors.textFaint, paddingRight: spacing.md }]}>
@@ -186,6 +192,41 @@ export function Field({
         ? <Text style={[font.tiny, { color: colors.danger }]}>{error}</Text>
         : hint ? <Text style={[font.tiny, { color: colors.textFaint }]}>{hint}</Text> : null}
     </View>
+  );
+}
+
+/**
+ * Telefon maydoni: `+998` chapda doimiy turadi, do'konchi faqat o'zining
+ * 9 xonasini yozadi va u yozilishi bilanoq "90 123 45 67" ko'rinishiga
+ * tushadi.
+ *
+ * MUHIM: `value` va `onChangeText` FAQAT milliy 9 xona bilan ishlaydi
+ * ("901234567"). Serverga yuborishdan oldin `tel.toliq()` chaqiriladi.
+ * Shu chegara tufayli ekranlarda "raqam qaysi shaklda?" degan savol
+ * umuman tug'ilmaydi.
+ */
+export function PhoneField({ value, onChangeText, ...props }: Omit<
+  React.ComponentProps<typeof Field>, 'value' | 'onChangeText' | 'prefix'
+> & {
+  value: string;
+  onChangeText: (milliy: string) => void;
+}) {
+  return (
+    <Field
+      label="TELEFON"
+      placeholder="90 123 45 67"
+      keyboardType="phone-pad"
+      autoComplete="tel"
+      autoCapitalize="none"
+      textContentType="telephoneNumber"
+      // "90 123 45 67" — 12 belgi. Ortiqchasini `milliy()` baribir kesadi,
+      // lekin maydonning o'zi ham to'lganini bildirib turgani yaxshi.
+      maxLength={12}
+      {...props}
+      prefix={tel.KOD}
+      value={tel.chiroyli(value)}
+      onChangeText={(t) => onChangeText(tel.milliy(t))}
+    />
   );
 }
 
@@ -340,6 +381,7 @@ const s = StyleSheet.create({
   },
   // Fokusdagi maydon ko'zga tashlansin — qaysi joyga yozayotganim aniq bo'lsin
   inputBoxOn: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
+  prefix: { paddingLeft: spacing.md },
   input: {
     flex: 1,
     paddingHorizontal: spacing.md,

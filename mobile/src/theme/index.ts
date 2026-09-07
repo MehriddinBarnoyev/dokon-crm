@@ -179,6 +179,9 @@ export const font = {
   /** Summalar uchun — har doim bir xil kenglikdagi raqamlar. */
   num:      { fontFamily: family.semibold, fontSize: 15, lineHeight: 21, ...tnum },
   numBig:   { fontFamily: family.bold,     fontSize: 27, lineHeight: 33, letterSpacing: -0.7, ...tnum },
+  /** Ro'yxat qatoridagi kichik summa — matndan ajralib tursin, lekin
+      qatorning asosiy raqami bo'lib ko'rinmasin. */
+  numSmall: { fontFamily: family.medium,   fontSize: 13, lineHeight: 18, ...tnum },
   mono: {
     fontSize: 15,
     fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' }),
