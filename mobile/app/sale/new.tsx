@@ -23,6 +23,25 @@ interface CartLine {
   product: Product;
   qty: string;      // matn sifatida — "1.5" yozishga imkon beradi
   price: string;
+  /**
+   * Do'konchi JAMI maydoniga yozgan aniq summa.
+   *
+   * Nega alohida saqlanadi? "32 minglik pishiriq bering" deyilganda miqdor
+   * 32 000 ÷ 35 000 = 0.914285… bo'ladi, u esa uch xonagacha qisqaradi
+   * (bazadagi `numeric(14,3)`). Qisqargan miqdorni qayta ko'paytirsak
+   * 0.914 × 35 000 = 31 990 — kassada 10 so'm kamomat. Ko'proq xona ham
+   * yordam bermaydi: bo'linma davriy kasr.
+   *
+   * Shuning uchun qatorning jamisi ko'paytmadan emas, shu raqamdan olinadi.
+   * Miqdor yoki narx qo'lda o'zgartirilsa — tozalanadi, ya'ni yana odatdagi
+   * ko'paytmaga qaytadi.
+   */
+  jami?: number;
+}
+
+/** Qator summasi: do'konchi yozgani bo'lsa — o'sha, aks holda ko'paytma. */
+function qatorJami(l: CartLine): number {
+  return l.jami ?? (Number(l.qty) || 0) * (Number(l.price) || 0);
 }
 
 /**
@@ -43,16 +62,18 @@ interface CartLine {
  * yozilsa, miqdor o'zi hisoblanadi (12000 ÷ 5000 = 2.4 kg) — kassir
  * kalkulyator qidirmaydi.
  */
-function CartRow({ line, onQty, onPrice, onRemove }: {
+function CartRow({ line, onQty, onPrice, onJami, onRemove }: {
   line: CartLine;
   onQty(v: string): void;
   onPrice(v: string): void;
+  /** Jami maydoniga summa yozildi — miqdor shundan hisoblanadi. */
+  onJami(summa: number): void;
   onRemove(): void;
 }) {
   const q = Number(line.qty) || 0;
   const narx = Number(line.price) || 0;
   const yetmaydi = q > Number(line.product.stock);
-  const jami = q * narx;
+  const jami = qatorJami(line);
 
   // Jami tahrirlanayotganda kiritilgan matn shu yerda turadi. null — tahrir
   // yopiq, ya'ni hisoblangan summa ko'rsatiladi. Aks holda "12000" yozayotib
@@ -70,7 +91,7 @@ function CartRow({ line, onQty, onPrice, onRemove }: {
     const summa = Number(toza);
     // Narx nol bo'lsa bo'lish ma'nosiz — miqdorga tegmaymiz.
     if (narx <= 0 || !Number.isFinite(summa)) return;
-    onQty(String(Number((summa / narx).toFixed(3))));
+    onJami(summa);
   }
 
   return (
@@ -184,8 +205,7 @@ export default function NewSaleScreen() {
     return { items: mahalliy.items, taxminiy: mahalliy.taxminiy };
   }, [products, search, cart]);
 
-  const total = cart.reduce(
-    (s, l) => s + (Number(l.qty) || 0) * (Number(l.price) || 0), 0);
+  const total = cart.reduce((s, l) => s + qatorJami(l), 0);
 
   function add(p: Product) {
     // Yangi qator ENG TEPAGA qo'shiladi: kassir hozir qo'shgan mahsulotining
@@ -196,6 +216,20 @@ export default function NewSaleScreen() {
 
   function update(id: string, patch: Partial<CartLine>) {
     setCart((c) => c.map((l) => (l.product.id === id ? { ...l, ...patch } : l)));
+  }
+
+  /**
+   * Jami maydoniga summa yozildi: miqdor shundan hisoblanadi va summaning
+   * O'ZI ham saqlanadi — bo'linma yaxlitlangach ko'paytma yana o'sha
+   * raqamni bermasligi mumkin ({@link CartLine.jami}).
+   */
+  function jamidan(id: string, summa: number) {
+    setCart((c) => c.map((l) => {
+      if (l.product.id !== id) return l;
+      const narx = Number(l.price) || 0;
+      if (narx <= 0) return l;
+      return { ...l, qty: String(Number((summa / narx).toFixed(3))), jami: summa };
+    }));
   }
 
   async function submit() {
@@ -218,7 +252,7 @@ export default function NewSaleScreen() {
       lines: [
         ...cart.map((l) =>
           `${l.qty} ${l.product.unit} ${l.product.name} × ${money(Number(l.price) || 0)}`
-          + ` = ${money((Number(l.qty) || 0) * (Number(l.price) || 0))} so'm`),
+          + ` = ${money(qatorJami(l))} so'm`),
         `To'lov: ${payment}${customer ? ` · ${customer.name}` : ''}`,
         payment === 'qarz'
           ? `${money(total)} so'm qarzga yoziladi`
@@ -243,6 +277,9 @@ export default function NewSaleScreen() {
           unit: l.product.unit,
           qty: Number(l.qty) || 0,
           unit_price: Number(l.price) || 0,
+          // Yozilgan summa server tomonda ham asosiy raqam bo'ladi —
+          // u yerda ham yaxlitlash farqi doirasida qabul qilinadi.
+          subtotal: l.jami ?? null,
         })),
         customer_id: customer?.id ?? null,
         customer_name: customer?.name ?? null,
@@ -339,8 +376,9 @@ export default function NewSaleScreen() {
           renderItem={({ item }) => (
             <CartRow
               line={item}
-              onQty={(v) => update(item.product.id, { qty: v })}
-              onPrice={(v) => update(item.product.id, { price: v })}
+              onQty={(v) => update(item.product.id, { qty: v, jami: undefined })}
+              onPrice={(v) => update(item.product.id, { price: v, jami: undefined })}
+              onJami={(summa) => jamidan(item.product.id, summa)}
               onRemove={() =>
                 setCart((c) => c.filter((x) => x.product.id !== item.product.id))}
             />
