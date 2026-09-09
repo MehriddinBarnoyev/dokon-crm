@@ -113,6 +113,7 @@ async function main() {
               ? Math.round(rnd(0.5, 4) * 2) / 2
               : Math.floor(rnd(1, 5)),
             unit_price: p.sale_price,
+            subtotal: null,
           })),
           customer_id: customer?.id ?? null,
           customer_name: customer?.name ?? null,

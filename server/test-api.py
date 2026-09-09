@@ -110,6 +110,53 @@ expected = 3 * float(p["sale_price"])
 check("kunlik kirim o'sdi", abs((cash1 - cash0) - expected) < 1e-6,
       f"+{cash1 - cash0:.0f} so'm")
 
+# --- Summasi yozilgan savdo (tarozidagi yaxlitlash) ---
+print("\n2b. \"32 minglik bering\" — summa aniq saqlanadi")
+# Do'konchi jamiga 32 000 yozadi, miqdor 32000/35000 = 0.914285… bo'lib
+# uch xonaga qisqaradi. Ko'paytma 31 990 — kassada 10 so'm kamomat edi.
+NARX, YOZILGAN = 35000, 32000
+MIQDOR = round(YOZILGAN / NARX, 3)          # ilovadagi toFixed(3) bilan bir xil
+check("miqdor yaxlitlanadi", MIQDOR == 0.914, f"{MIQDOR}")
+check("ko'paytma kam chiqadi", abs(MIQDOR * NARX - 31990) < 1e-6,
+      f"{MIQDOR * NARX:,.0f}")
+
+
+def savdo_jamisi(sale_id):
+    """Yangi yozilgan savdoning `total` i. Ro'yxatdan id bo'yicha topamiz —
+    oxirgi qatorga tayanish bir soniyada ikki savdo bo'lsa adashtiradi."""
+    royxat, _ = call("/sales?limit=10")
+    for r in royxat if isinstance(royxat, list) else []:
+        if r.get("id") == sale_id:
+            return float(r["total"])
+    return None
+
+
+res, st = call("/sales", "POST", {
+    "items": [{"product_id": p["id"], "name": p["name"], "unit": p["unit"],
+               "qty": MIQDOR, "unit_price": NARX, "subtotal": YOZILGAN}],
+    "payment_method": "naqd"})
+check("savdo yozildi", st == 200, res.get("summary", ""))
+aniq_id = res.get("id")
+jami = savdo_jamisi(aniq_id)
+check("jami aynan yozilgan summa", jami is not None and abs(jami - YOZILGAN) < 1e-6,
+      f"{jami:,.0f} so'm" if jami is not None else "topilmadi")
+
+# Chegirmani jimgina o'tkazib bo'lmaydi — u narx orqali yozilishi kerak.
+res2, st2 = call("/sales", "POST", {
+    "items": [{"product_id": p["id"], "name": p["name"], "unit": p["unit"],
+               "qty": MIQDOR, "unit_price": NARX, "subtotal": 20000}],
+    "payment_method": "naqd"})
+check("savdo yozildi (chegirma sinovi)", st2 == 200)
+jami2 = savdo_jamisi(res2.get("id"))
+check("chegaradan tashqari summa rad etiladi",
+      jami2 is not None and abs(jami2 - MIQDOR * NARX) < 1e-6,
+      f"{jami2:,.0f} so'm (ko'paytma)" if jami2 is not None else "topilmadi")
+
+# Sinov savdolari qoldiqni buzmasin.
+for sid in (aniq_id, res2.get("id")):
+    if sid:
+        call(f"/sales/{sid}", "DELETE")
+
 # --- Savdoni bekor qilish qoldiqni qaytaradi ---
 print("\n3. Savdoni bekor qilish")
 res, st = call(f"/sales/{sale_id}", "DELETE")

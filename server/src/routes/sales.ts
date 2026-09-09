@@ -50,6 +50,8 @@ export default async function saleRoutes(app: FastifyInstance) {
         unit: UnitSchema.default('dona'),
         qty: z.number().positive(),
         unit_price: z.number().nonnegative(),
+        /** Do'konchi yozgan aniq summa — `actions.ts` dagi `qatorSummasi`. */
+        subtotal: z.number().nonnegative().nullable().default(null),
       })).min(1),
       customer_id: z.string().uuid().nullable().default(null),
       customer_name: z.string().nullable().default(null),

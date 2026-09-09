@@ -30,7 +30,36 @@ const SaleItem = z.object({
   unit: UnitSchema.default('dona'),
   qty,
   unit_price: money,
+  /**
+   * Do'konchi kassada aytgan aniq summa. Berilmasa — `qty × unit_price`.
+   * Qachon kerakligi {@link qatorSummasi} da yozilgan.
+   */
+  subtotal: money.nullable().default(null),
 });
+
+/**
+ * Qator summasi.
+ *
+ * Odatda bu oddiy `qty × unit_price`. Lekin do'konda savdo ko'pincha
+ * TESKARI boshlanadi: mijoz "32 minglik pishiriq bering" deydi, tarozida
+ * esa 0.914 kg chiqadi. `qty` bazada uch xonagacha saqlanadi
+ * (`numeric(14,3)`), shuning uchun 32 000 ÷ 35 000 = 0.914285… → 0.914
+ * bo'lib qisqaradi va ko'paytma 31 990 chiqadi — kassada 10 so'm kamomat.
+ * Bu farqni ko'proq xona ham yo'q qilmaydi: bo'linma davriy kasr.
+ *
+ * Bunday holatda ROST raqam — do'konchi aytgan summa. Pul aniq, tarozidagi
+ * og'irlik esa taxminiy. Shuning uchun `subtotal` qabul qilinadi, LEKIN
+ * faqat aynan o'sha yaxlitlash chegarasida: `qty` ning oxirgi xonasi
+ * (0.001) narxga ko'paytirilgandagi siljish. Undan tashqarisi chegirma
+ * yoki xato — u holda ko'paytma ishlatiladi, chunki chegirma narxni
+ * o'zgartirish orqali ochiq yozilishi kerak.
+ */
+function qatorSummasi(item: { qty: number; unit_price: number; subtotal?: number | null }): number {
+  const kopaytma = item.qty * item.unit_price;
+  if (item.subtotal == null) return kopaytma;
+  const chek = 0.001 * item.unit_price + 0.01;
+  return Math.abs(item.subtotal - kopaytma) <= chek ? item.subtotal : kopaytma;
+}
 
 export const ActionSchema = z.discriminatedUnion('type', [
   /** Savdo: ombordan chiqim + kunlik kirim */
@@ -242,7 +271,7 @@ export async function executeActions(
             warnings.push(`"${item.name}" bazada yo'q — savdo yozildi, lekin ombor qoldig'i o'zgarmadi.`);
           }
 
-          const subtotal = item.qty * item.unit_price;
+          const subtotal = qatorSummasi(item);
           total += subtotal;
           costTotal += item.qty * cost;
           prepared.push({ ...item, name, unit, cost_price: cost, subtotal });
