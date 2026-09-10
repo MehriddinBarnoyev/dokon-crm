@@ -54,6 +54,36 @@ export interface XaridQatori {
   name: string; qty: number; unit: Unit; unit_price: number; subtotal: number;
 }
 
+/** Omborga kirim qatori — nima, qancha, qaysi TAN NARXDA olindi. */
+export interface KirimQatori {
+  name: string; qty: number; unit: Unit; cost_price: number; subtotal: number;
+}
+
+/** `GET /purchases` — do'konga olingan tovar. Chiqim EMAS. */
+export interface Kirim {
+  id: string; supplier: string | null; total: number;
+  note: string | null; source: string; created_at: string;
+  user_name: string | null;
+  items: KirimQatori[] | null;
+}
+
+/**
+ * `GET /purchases/meta/aylanma` — "tovarga qo'ygan pulim qayerda?"
+ *
+ * `omborda` DAVRGA BOG'LIQ EMAS — u hozirgi qoldiqning tan narxdagi
+ * qiymati. Qolgan uchtasi tanlangan davr bo'yicha.
+ */
+export interface TovarAylanma {
+  /** Shu davrda tovarga sarflangan pul. */
+  sarflandi: number;
+  /** Shu davrda sotilgan molning tan narxi — pul bo'lib qaytgani. */
+  sotilgan: number;
+  /** Shu davrdagi savdo summasi (tan narx + foyda). */
+  savdo: number;
+  /** Hozir omborda turgan molning tan narxdagi qiymati. */
+  omborda: number;
+}
+
 /** `GET /debts/customer/:id/purchases` */
 export interface Xarid {
   id: string; total: number; paid: number;

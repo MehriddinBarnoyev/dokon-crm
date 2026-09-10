@@ -107,6 +107,8 @@ export default function DayScreen() {
 
   const s = data.summary;
   const foyda = Number(s.net_profit);
+  // Eski serverda bu maydon yo'q — `?? 0`.
+  const tovarga = Number(s.purchase_total ?? 0);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
@@ -179,6 +181,22 @@ export default function DayScreen() {
               <View style={st.zanjirChiziq} />
               <Qator label="Sof foyda" value={money(foyda)} kalin
                 tone={foyda >= 0 ? colors.success : colors.danger} />
+
+              {/* TOVARGA SARFLANGAN PUL — zanjirdan TASHQARIDA, ataylab.
+                  U foydadan ayirilmaydi: mol olish xarajat emas, pulning
+                  tovarga aylanishi; foydaga u sotilganda "tan narx"
+                  bo'lib qatnashadi (yuqoridagi ikkinchi qator).
+                  Lekin pul kassadan chiqqan, shuning uchun ko'rsatiladi. */}
+              {tovarga > 0 && (
+                <>
+                  <View style={st.zanjirChiziq} />
+                  <Qator label="Tovarga sarflandi" value={money(tovarga)}
+                    tone={colors.primary} />
+                  <Text style={[font.tiny, { color: colors.textFaint }]}>
+                    Foydadan ayirilmagan — sotilganda tan narx bo'lib hisobga olinadi
+                  </Text>
+                </>
+              )}
             </View>
           ) : (
             <View style={st.grid}>

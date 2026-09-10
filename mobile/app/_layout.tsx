@@ -74,6 +74,7 @@ function AuthGate() {
       <Stack.Screen name="expense/[id]" options={{ presentation: 'modal' }} />
       <Stack.Screen name="product/[id]" />
       <Stack.Screen name="debt/[id]" />
+      <Stack.Screen name="purchases/index" />
       <Stack.Screen name="day/[date]" />
     </Stack>
   );

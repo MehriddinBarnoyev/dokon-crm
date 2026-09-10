@@ -2,7 +2,7 @@
   "expo": {
     "name": "Do'kon CRM",
     "slug": "dokon-crm",
-    "version": "1.17.0",
+    "version": "1.18.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -22,7 +22,7 @@
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "versionCode": 21,
+      "versionCode": 22,
       "predictiveBackGestureEnabled": false,
       "package": "uz.dokoncrm.app"
     },

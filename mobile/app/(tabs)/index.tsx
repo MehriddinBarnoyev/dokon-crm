@@ -196,14 +196,24 @@ export default function HomeScreen() {
 
                     Lekin pul kassadan chiqqan — buni ko'rsatmasak
                     do'konchi "pulim qayerga ketdi?" deb qolardi. */}
+                {/* Bosiladigan: kirimlar ro'yxati chiqimlarnikidek
+                    shu raqamning ortida turadi. */}
                 {tovargaSarflandi > 0 && (
-                  <View style={s.tovarIzoh}>
+                  <PressScale
+                    accessibilityRole="button"
+                    accessibilityLabel={`Bugun ${money(tovargaSarflandi)} so'm tovarga`
+                      + ' sarflandi, kirimlar ro\'yxatini ochish'}
+                    onPress={() => router.push('/purchases')}
+                    scale={0.99}
+                    style={s.tovarIzoh}
+                  >
                     <Icon name="kirim" size={14} color={colors.primary} />
                     <Text style={[font.tiny, { color: colors.primary, flex: 1 }]}>
                       Bugun {money(tovargaSarflandi)} so'm tovarga sarflandi
                       {' '}— foydadan ayirilmaydi, u sotilganda hisobga olinadi
                     </Text>
-                  </View>
+                    <Icon name="oldinga" size={14} color={colors.primary} />
+                  </PressScale>
                 )}
 
                 {/* Ikki qator: eng ko'p bosiladigan "Yangi savdo" butun

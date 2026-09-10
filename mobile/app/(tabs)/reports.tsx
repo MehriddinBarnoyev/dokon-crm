@@ -25,6 +25,12 @@ interface DailyRow {
   credit_total: number;
   /** `net_profit` ichidagi qarzda qolgan ulush */
   credit_profit: number;
+  /**
+   * Tovarga sarflangan pul. Foydadan AYIRILMAYDI — mol olish xarajat
+   * emas, pulning tovarga aylanishi; foydaga u sotilganda, tan narx
+   * bo'lib ta'sir qiladi. Ixtiyoriy: eski serverda bu maydon yo'q.
+   */
+  purchase_total?: number;
 }
 interface TopRow {
   name: string; unit: string; total_qty: number;
@@ -122,7 +128,9 @@ export default function ReportsScreen() {
     profit: acc.profit + Number(r.net_profit),
     count: acc.count + Number(r.sales_count),
     qarzFoyda: acc.qarzFoyda + Number(r.credit_profit ?? 0),
-  }), { sales: 0, tannarx: 0, expense: 0, profit: 0, count: 0, qarzFoyda: 0 });
+    // Eski serverda bu maydon yo'q — `?? 0`.
+    tovar: acc.tovar + Number(r.purchase_total ?? 0),
+  }), { sales: 0, tannarx: 0, expense: 0, profit: 0, count: 0, qarzFoyda: 0, tovar: 0 });
 
   /**
    * Yalpi foyda = savdo − sotilgan molning tan narxi.
@@ -238,6 +246,23 @@ export default function ReportsScreen() {
                       label="Sof foyda" value={money(sum.profit)} kalin
                       tone={foydali ? colors.success : colors.danger}
                     />
+
+                    {/* TOVAR — zanjirdan TASHQARIDA, ataylab. Mol olish
+                        xarajat emas, pulning tovarga aylanishi; foydaga u
+                        sotilganda "tan narx" bo'lib qatnashadi (yuqorida).
+                        Doim ko'rinadi (0 bo'lsa ham) — kirimlar ro'yxatiga
+                        yagona doimiy yo'l shu. */}
+                    <View style={s.zanjirChiziq} />
+                    <PressScale
+                      accessibilityRole="button"
+                      accessibilityLabel={`Tovarga sarflandi ${money(sum.tovar)} so'm,`
+                        + ' kirimlar ro\'yxatini ochish'}
+                      onPress={() => router.push('/purchases')}
+                      scale={0.98}
+                    >
+                      <Zanjir label="Tovarga sarflandi ›" value={money(sum.tovar)}
+                        tone={colors.primary} />
+                    </PressScale>
                   </View>
                 ) : (
                   <View style={s.grid}>
@@ -250,6 +275,17 @@ export default function ReportsScreen() {
                         scale={0.96}
                       >
                         <Stat label="Chiqim ›" value={money(sum.expense)} tone={colors.danger} />
+                      </PressScale>
+                    </Cell>
+                    <Cell>
+                      <PressScale
+                        accessibilityRole="button"
+                        accessibilityLabel="Tovar kirimlari ro'yxatini ochish"
+                        onPress={() => router.push('/purchases')}
+                        scale={0.96}
+                      >
+                        <Stat label="Tovarga ›" value={money(sum.tovar)}
+                          tone={colors.primary} />
                       </PressScale>
                     </Cell>
                   </View>

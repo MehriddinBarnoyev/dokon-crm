@@ -22,6 +22,7 @@ import debtRoutes from './routes/debts.js';
 import expenseRoutes from './routes/expenses.js';
 import syncRoutes from './routes/sync.js';
 import flushRoutes from './routes/flush.js';
+import purchaseRoutes from './routes/purchases.js';
 import reportRoutes from './routes/reports.js';
 import aiRoutes from './routes/ai.js';
 
@@ -168,6 +169,7 @@ await app.register(expenseRoutes, { prefix: '/expenses' });
 await app.register(reportRoutes, { prefix: '/reports' });
 await app.register(aiRoutes, { prefix: '/ai' });
 await app.register(syncRoutes, { prefix: '/sync' });
+await app.register(purchaseRoutes, { prefix: '/purchases' });
 await app.register(flushRoutes, { prefix: '/sync' });
 
 try {
