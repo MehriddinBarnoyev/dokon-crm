@@ -291,10 +291,13 @@ dokon-crm/
 ├── docker-compose.yml
 ├── server/
 │   ├── db/schema.sql           Postgres sxemasi + hisobot ko'rinishlari
+│   ├── db/004-tezlik.sql       Kunlik yakun (UNION ALL) + kun indekslari
+│   ├── db/005-shtrix.sql       Bir mahsulotga bir nechta shtrix-kod
 │   ├── test-api.py             API uchdan-uchgacha sinovi
 │   └── src/
 │       ├── lib/actions.ts      ⭐ Bazani o'zgartiradigan BARCHA amallar
 │       ├── lib/resolve.ts      ⭐ Nomni bazadagi mahsulotga bog'lash (sof SQL)
+│       ├── lib/tozalash.ts     mutation_log ni davriy tozalash
 │       ├── ai/
 │       │   ├── client.ts       Groq klienti, model tanlovi, xato tarjimasi
 │       │   ├── extract.ts      Matn → JSON (AI ning YAGONA vazifasi)
@@ -304,11 +307,15 @@ dokon-crm/
 │       └── routes/             auth, products, sales, debts, reports, ai
 └── mobile/
     ├── app/                    Ekranlar (expo-router)
+    ├── credentials/            ⚠️ Release imzo kaliti — git'da YO'Q, zaxiralang
+    ├── plugins/                withReleaseSigning — prebuild'da imzoni ulaydi
     └── src/
         ├── api/                Server bilan aloqa
-        ├── components/         AiCommandBar, Icon, Confirm,
-        │                       FilterSheet, CustomerPicker, UI
-        ├── lib/                 Aqlli qidiruv (server bilan bir xil qoidalar)
+        ├── components/         AiCommandBar, Icon, Confirm, FilterSheet,
+        │                       CustomerPicker, ShtrixSkaner, UI
+        ├── data/               products, customers — mahalliy kesh omborlari
+        ├── lib/chek.ts          Chek: ma'lumot shakli + PDF uchun HTML
+        ├── lib/                Aqlli qidiruv, oflayn navbat, keshRoyxat
         └── theme/              Rang, oraliq, shrift
 ```
 
@@ -390,6 +397,87 @@ ostida teg bo'lib turadi, bosib o'chiriladi.
 Filtrlash **serverda** bajariladi (`GET /products?status=&unit=&category=&sort=`),
 telefonda qayta filtrlanmaydi — ikki joyda ikki xil qoida bo'lmasligi uchun.
 Mavjud variantlar: `GET /products/meta/filters`.
+
+## Foyda tahlili
+
+Foyda ilgari faqat KUN bo'yicha ko'rinardi. Bitta zararli savdo kunlik
+yig'indida yo'qolib ketardi, "qaysi mahsulot pul olib keladi" degan savolga
+esa javob yo'q edi.
+
+**Har bir savdoda foyda.** Savdolar ro'yxatida endi summa yonida foyda va
+ustama foizi turadi. Tan narx kiritilmagan bo'lsa raqam o'rniga *"Tan narx
+yo'q — foyda hisoblanmadi"* yoziladi: bunday savdoning "foydasi" butun
+summaga teng bo'lib chiqadi, ya'ni yolg'on raqam.
+
+**Tushum ⇄ Foyda.** Hisobotdagi mahsulotlar ro'yxatini ikki xil saralash
+mumkin. Bu bir xil ro'yxat emas — seed ma'lumotida tushum bo'yicha birinchi
+turgan "Guruch Lazer 1kg" aslida **482 000 so'm zarar** keltirgan (ustama
+−45%), foyda bo'yicha birinchi esa butunlay boshqa mahsulot. Un yoki shakar
+katta summaga sotiladi, lekin ustamasi bir necha foiz.
+
+Har qatorda **ustama %** ham ko'rsatiladi — "ko'p sotiladi, lekin foydasi
+kam" holatini bir qarashda ajratadi.
+
+**Zarariga ketgan savdolar** — tan narxidan arzon ketganlari alohida
+ro'yxatda (`GET /reports/loss-sales`). Do'kondagi eng jim yo'qotish: narx
+xato yozilgan, aksiya hisoblanmagan yoki tan narx yangilangandan keyin sotuv
+narxi eskiligicha qolgan.
+
+> `cost_total = 0` bo'lgan savdolar bu ro'yxatga ATAYLAB tushmaydi — ular
+> zarar emas, tan narxi kiritilmagan mahsulotlar. Ularni aralashtirsak,
+> haqiqiy zararni ko'mib yuborardi. Ular uchun alohida ogohlantirish bor.
+
+## Chek
+
+Savdo saqlangandan keyin chek ekrani ochiladi: do'kon nomi, chek raqami,
+sana, sotuvchi, mijoz, mahsulotlar (miqdor × narx = summa), JAMI, to'lov
+turi, to'langan va qarz qoldig'i.
+
+| Tugma | Nima qiladi |
+|---|---|
+| **Ulashish** | PDF yasab, ulashish oynasini ochadi — Telegram, WhatsApp, fayl |
+| **Chop etish** | Tizimning chop etish oynasi: printer yoki "PDF ga saqlash" |
+| **Yopish** | Ishga qaytadi |
+
+Eski savdoning cheki ham chiqadi: **Savdolar → savdoni bosing → Chek**.
+
+**Chek SAVATDAN yig'iladi, serverdan qayta so'ralmaydi.** Sabab: do'konda
+internet uzilib turadi va savdo navbatga tushishi mumkin, chek esa xaridor
+ketguncha kerak. Bunday holatda chekda "Savdo navbatda" deb yoziladi va
+raqam qurilmaning mutatsiya uuid'sidan olinadi — serverga yetgach raqam
+savdo id'sidan chiqadi.
+
+PDF eni 80 mm (226 punkt) — kassa qog'ozi o'lchamida. Balandligi qatorlar
+soniga qarab hisoblanadi, chek bir varaqqa sig'sin: raqamlar taxmin emas,
+chek HTML'i brauzerda o'lchab olingan (`src/lib/chek.ts` → `pdfOlchami`).
+
+## Bir mahsulotga bir nechta shtrix-kod
+
+Ayni mahsulot do'konga har xil kod bilan keladi: "Fanta 1L" ning eski va yangi
+partiyasi, boshqa zavod yoki boshqa mamlakat uchun qadoq — kod boshqa.
+Ilgari `products.barcode` bitta ustun edi, ya'ni do'konchi ulardan FAQAT
+BITTASINI saqlay olardi. Qolgan qadoqni skanerlaganda kassada "topilmadi"
+chiqardi va u nomi bilan qidirishga majbur bo'lardi.
+
+**Model.** `products.barcode` — asosiy kod (o'zgarmadi). `product_barcodes` —
+qo'shimchalari. Ilova ikkalasini birlashtirib bitta ro'yxat qilib ko'rsatadi;
+qaysi kod qayerda saqlanishi do'konchining ishi emas.
+
+```
+Mahsulot sahifasi → SHTRIX-KODLAR → [Skanerlash]
+```
+
+| Qoida | Nega |
+|---|---|
+| `UNIQUE (shop_id, code)` | Bitta kod bitta mahsulotni bildiradi. Aks holda skaner ikki xil javob berardi va qaysi biri to'g'ri ekanini hech kim ayta olmasdi |
+| Band kodni qo'shishga urinish → **409** | Xabarda qaysi mahsulot egallagani aytiladi |
+| Asosiy kod o'chirilsa `barcode = NULL` | Ro'yxat do'konchi uchun bitta, ichki tuzilishi ko'rinmaydi |
+| Kod o'zgarganda `products.updated_at` yangilanadi | Delta-sync faqat shu ustunga qaraydi. Busiz yangi kod telefon keshiga tushmasdi va **oflaynda skaner uni topa olmasdi** |
+| Bitta mahsulotga ko'pi bilan 20 ta | Xatodan himoya |
+
+Qidiruv (`dokon_search_products`) qo'shimcha kodni ham aniq moslik (ball 1.0)
+deb hisoblaydi. Shtrix-kodda "taxminiy" ma'nosi yo'q: kod yo to'g'ri, yo
+boshqa mahsulotniki — shuning uchun 2-bosqich faqat NOMlarga qo'llanadi.
 
 ## Aqlli qidiruv
 
@@ -617,6 +705,59 @@ cd mobile
 EXPO_PUBLIC_API_URL=https://dokon-api.onrender.com npx expo start
 ```
 
+## Tezlik va xavfsizlik (server)
+
+Bularning hammasi `server/src/index.ts` da yoqilgan — alohida sozlash kerak emas.
+
+**Gzip.** Do'kondagi internet sekin va o'lchovli, javoblarning kattasi esa
+JSON. `@fastify/compress` uni 4-8 barobar siqadi (o'lchandi: `/sync/products`
+4 470 → 1 038 bayt). Rasmlar siqilmaydi — ular allaqachon siqilgan.
+
+**So'rov chegarasi.** `/auth/login` ga cheksiz urinish mumkin edi, parol esa
+4 belgidan boshlanadi (`z.string().min(4)`) — ya'ni taxminlab topsa bo'lardi.
+Endi bitta IP dan 5 daqiqada 15 urinish; ro'yxatdan o'tish soatiga 5 marta.
+Chegara IP bo'yicha, shuning uchun Fastify `trustProxy` bilan ishlaydi — aks
+holda Render orqasida hamma do'konchi bitta IP dek ko'rinib, biri
+ikkinchisini bloklardi.
+
+**Kunlik yakun (`daily_summary`).** Ilgari bu ko'rinish to'rtta agregatni
+FULL JOIN qilardi. Postgres shartni FULL JOIN ostiga tushira olmaydi, shuning
+uchun "bugungi hisob" so'rovi ham `sales`, `expenses`, `debts` jadvallarini
+BUTUNLAY, hamma do'kon bo'yicha skanerlardi. `db/004-tezlik.sql` uni UNION ALL
+shakliga o'tkazadi: endi `shop_id` va `day` guruhlash ustunlari bo'lgani uchun
+shart har bir bo'lakka tushadi va indeksdan foydalanadi. Raqamlar o'zgarmagan —
+eski va yangi ko'rinish natijasi qator-ma-qator solishtirilgan.
+
+**`mutation_log` tozalash.** Oflayn navbatning idempotentlik jurnali har
+savdoga bitta qator qo'shardi va hech qachon tozalanmasdi. `lib/tozalash.ts`
+12 soatda bir marta 30 kundan eskisini o'chiradi.
+
+## Tezlik (mobil)
+
+**Ekran avval keshdan chiziladi.** Savdolar, qarzlar va chiqimlar ekrani har
+ochilganda bo'sh skeletonda turib serverdan javob kutardi; internet yo'q bo'lsa
+esa BO'SH qolardi. Endi `src/lib/keshRoyxat.ts` ularni shifrlangan keshdan
+darhol ko'rsatadi va fon so'rovi ustidan yangilaydi. So'rov yiqilsa — oxirgi
+ma'lum holat qoladi, xato emas.
+
+**Mijozlar ham keshda** (`src/data/customers.ts`). `CustomerPicker` har
+ochilganda `/debts/customers` ga borardi; internet yo'q bo'lsa ro'yxat bo'sh
+chiqib, do'konchi mavjud mijozni "yangi" qilib qayta ochib yuborardi.
+
+**Server uyqusidan keyingi birinchi so'rov.** Render bepul rejada 15
+daqiqadan keyin uxlaydi, uyg'onish ~50 soniya. Kirish (`/auth/me`,
+`/auth/login`) uchun kengaytirilgan muddat allaqachon bor edi, lekin
+odatdagi GET so'rovlarida 20 soniya edi — ya'ni ilova ochiq turganda
+server uxlab qolsa, keyingi yangilash "Server javob bermadi" berardi.
+Endi vaqt tugasa bir marta, 45 soniyalik muddat bilan qayta uriniladi.
+Faqat GET: POST ni qayta yuborish amalni ikkilantirishi mumkin
+(`src/api/client.ts` → `qaytaUrin`).
+
+**Shtrix-kod skaneri savdo ekranida.** Ilgari skaner faqat mahsulot
+qo'shishda bor edi. Kassada esa u har savdoda kerak. Bir xil kod qayta
+o'qilsa yangi qator ochilmaydi — miqdor oshadi (`app/sale/new.tsx` →
+`skanQabul`).
+
 ## Foydali buyruqlar
 
 ```bash
@@ -632,14 +773,78 @@ cd mobile
 npx expo start       # dev server
 npm run typecheck
 npx expo export --platform android   # to'plam yig'ilishini tekshirish
+npm run apk                          # release APK yig'ish (pastga qarang)
 ```
+
+## APK yig'ish
+
+> **TARTIB MUHIM: avval server, keyin APK.** 1.11.0 yangi marshrutlarni
+> (`POST/DELETE /products/:id/barcodes`) va yangi migratsiyani
+> (`db/005-shtrix.sql`) talab qiladi. Eski serverga ulangan yangi APK'da
+> mahsulot sahifasidagi "Skanerlash" xato beradi — ilova yiqilmaydi,
+> lekin kod qo'shilmaydi.
+
+```bash
+cd mobile
+npm run apk
+# natija: android/app/build/outputs/apk/release/app-release.apk
+```
+
+`android/` papkasi git'da YO'Q — uni `expo prebuild` qayta yaratadi. Shuning
+uchun build sozlamalari `app.json` da turadi va har prebuild'da qaytadan
+qo'llanadi:
+
+| Sozlama | Qiymat | Nima beradi |
+|---|---|---|
+| `buildArchs` | `armeabi-v7a`, `arm64-v8a` | x86/x86_64 faqat emulyator uchun edi — APK hajmining yarmi |
+| `enableMinifyInReleaseBuilds` | `true` | R8 ishlatilmagan kodni olib tashlaydi |
+| `enableShrinkResourcesInReleaseBuilds` | `true` | ishlatilmagan resurslar |
+
+> **R8 (minify) yoqilgandan keyin APK'ni QURILMADA sinang.** R8 ishlatilmagan
+> deb hisoblagan kodni olib tashlaydi va kamdan-kam hollarda kerakligini
+> ham olib qo'yadi — bu faqat ishga tushirganda bilinadi. Kirish → savdo
+> yozish → hisobot → AI buyrug'ini bir marta bosib chiqing. Muammo bo'lsa
+> `app.json` da `enableMinifyInReleaseBuilds` ni `false` qiling (u holda
+> `enableShrinkResourcesInReleaseBuilds` ham `false` bo'lishi shart).
+
+**Xotirasi kam mashinada.** `npm run apk` ataylab `--no-parallel
+--max-workers=2` bilan ishlaydi: 8 GB li mashinada parallel build + R8 +
+Metro birga sig'maydi va yadro Gradle'ni o'ldiradi
+("Gradle build daemon disappeared unexpectedly"). Yig'ishdan oldin brauzer
+va boshqa og'ir dasturlarni yopgan ma'qul.
+
+### ⚠️ Imzo kaliti — eng muhim fayl
+
+Ilgari release to'plami **debug kaliti** bilan imzolanardi. U kalit har
+mashinada boshqacha va hammaga ma'lum, natijada: Play Store qabul qilmaydi,
+boshqa mashinada yig'ilgan APK esa o'rnatilgan ilovani yangilay olmaydi.
+
+Endi imzo `mobile/credentials/` dan olinadi (`plugins/withReleaseSigning.js`
+uni har prebuild'da `build.gradle` ga ulaydi). Papka `.gitignore` da.
+
+> **BU PAPKANI ZAXIRALANG.** `credentials/dokon-release.jks` va
+> `credentials/keystore.properties` yo'qolsa, o'rnatilgan ilovani boshqa
+> **hech qachon** yangilab bo'lmaydi — har bir do'konchi ilovani o'chirib,
+> ma'lumotsiz qaytadan o'rnatishga majbur bo'ladi. Nusxasini parol
+> menejeriga yoki shifrlangan diskka qo'ying.
+
+> **Bir martalik:** 1.9.1 debug kaliti bilan imzolangan edi, 1.10.0 esa
+> yangi kalit bilan. Ustiga o'rnatilmaydi — eski ilovani **o'chirib**,
+> yangisini o'rnatish kerak. Bundan keyingi barcha yangilanishlar odatdagidek
+> ustiga tushaveradi.
 
 ## Keyingi qadamlar
 
 Hozircha qilinmagan, lekin poydevor tayyor:
 
-- **Oflayn rejim** — internet uzilganda savdo yozish (`expo-sqlite` + navbat)
-- **Chek chop etish** — Bluetooth termal printer
-- **Shtrix-kod skaneri** — `CameraView` da `onBarcodeScanned` allaqachon mavjud
+- **OTA yangilanish** — `expo-updates` + EAS Update. Hozir har tuzatish uchun
+  APK yig'ib, do'konchiga yuborish kerak; OTA bilan JS o'zgarishi ilova
+  qayta ochilganda o'zi yetib boradi
+- **Chek chop etish** — Bluetooth termal printer (yoki chekni rasm qilib
+  Telegram/WhatsApp'ga yuborish — printer'siz ham ishlaydi)
+- **Qarz muddati eslatmasi** — `debts.due_date` bor, `expo-notifications` kerak
+- **Ovozli buyruq** — `AiCommandBar` tayyor, Groq'da `whisper-large-v3-turbo`
+- **Tungi rejim** — `theme/index.ts` da hozir bitta (yorug') palitra
 - **Bir nechta filial** — sxemada `shop_id` bor, faqat UI kerak
-- **APK** — `eas build -p android`
+- **Rasmlarni tashqi omborga** — Render'ning bepul planida disk yo'q,
+  `uploads/` har deploy'da tozalanadi (Cloudflare R2 / S3)
