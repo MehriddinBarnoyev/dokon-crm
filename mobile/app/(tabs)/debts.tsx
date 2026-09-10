@@ -9,6 +9,7 @@ import { ScreenHeader } from '../../src/components/ScreenHeader';
 import { SkeletonList } from '../../src/components/Skeleton';
 import { PressScale } from '../../src/components/Press';
 import { AnimatedMoney } from '../../src/components/AnimatedNumber';
+import { useKeshlangan } from '../../src/lib/keshRoyxat';
 import {
   colors, elevation, font, money, palette, radius, sanaMatni, spacing,
 } from '../../src/theme';
@@ -31,15 +32,16 @@ function rang(name: string) {
 
 export default function DebtsScreen() {
   const router = useRouter();
-  const [items, setItems] = useState<Debtor[] | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [onlyOwing, setOnlyOwing] = useState(true);
 
-  const load = useCallback(async (owing: boolean) => {
-    setItems(await api<Debtor[]>(`/debts${owing ? '?only_owing=1' : ''}`));
-  }, []);
+  // Ikki filtr — ikki alohida kesh kaliti, aks holda biri ikkinchisini bosardi.
+  const olib = useCallback(
+    () => api<Debtor[]>(`/debts${onlyOwing ? '?only_owing=1' : ''}`), [onlyOwing]);
+  const { data: items, yangila: load } = useKeshlangan<Debtor[]>(
+    onlyOwing ? 'debts.qarzdor' : 'debts.hammasi', olib);
 
-  useFocusEffect(useCallback(() => { load(onlyOwing).catch(() => {}); }, [load, onlyOwing]));
+  useFocusEffect(useCallback(() => { load().catch(() => {}); }, [load]));
 
   const total = (items ?? []).reduce((s, d) => s + Number(d.balance), 0);
   const overdue = (items ?? []).filter((d) => d.overdue).length;
@@ -90,7 +92,7 @@ export default function DebtsScreen() {
             <RefreshControl
               refreshing={refreshing} tintColor={colors.primary}
               onRefresh={async () => {
-                setRefreshing(true); await load(onlyOwing).catch(() => {}); setRefreshing(false);
+                setRefreshing(true); await load().catch(() => {}); setRefreshing(false);
               }}
             />
           }

@@ -63,6 +63,9 @@ function AuthGate() {
       <Stack.Screen name="login" />
       <Stack.Screen name="(tabs)" />
       <Stack.Screen name="sale/new"     options={{ presentation: 'modal' }} />
+      {/* Chek savdodan keyin `replace` bilan ochiladi — modal ko'rinishi
+          savdo oqimining davomi ekanini bildiradi. */}
+      <Stack.Screen name="chek"         options={{ presentation: 'modal' }} />
       <Stack.Screen name="product/new"  options={{ presentation: 'modal' }} />
       <Stack.Screen name="settings"     options={{ presentation: 'modal' }} />
       <Stack.Screen name="expense/new"  options={{ presentation: 'modal' }} />

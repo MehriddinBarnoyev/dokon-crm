@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { api, ApiError, setToken, getToken, setUnauthorizedHandler } from './client';
 import * as productStore from '../data/products';
+import * as customerStore from '../data/customers';
 import * as cache from '../lib/cache';
 import * as outbox from '../lib/outbox';
 import type { Shop, User } from './types';
@@ -45,7 +46,12 @@ async function seansniSora(): Promise<Session> {
   let oxirgi: unknown;
   for (let urinish = 0; urinish < 3; urinish++) {
     try {
-      return await api<Session>('/auth/me', { timeoutMs: UYQU_TIMEOUT });
+      // `qaytaUrin: false` — qayta urinish MANA SHU siklda. `client.ts`
+      // dagi avtomatik qayta urinish ham qo'shilsa, har urinish 45+70
+      // soniyaga cho'zilib, jami besh daqiqadan oshib ketardi.
+      return await api<Session>('/auth/me', {
+        timeoutMs: UYQU_TIMEOUT, qaytaUrin: false,
+      });
     } catch (e) {
       oxirgi = e;
       if (e instanceof ApiError && e.status !== 0) throw e;
@@ -67,6 +73,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(s.user);
     setShop(s.shop);
     productStore.setShop(s.shop.id);
+    customerStore.setShop(s.shop.id);
     outbox.setShop(s.shop.id);
     if (saqla) await cache.write(SEANS_BOLIM, SEANS_NOMI, s).catch(() => {});
   }, []);
@@ -77,6 +84,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUnauthorizedHandler(() => {
       setUser(null); setShop(null);
       productStore.setShop(null);
+      customerStore.setShop(null);
       outbox.setShop(null);
       // Saqlangan nusxa ham ketsin — aks holda keyingi ochilishda
       // yaroqsiz seans qayta tiklanardi.
@@ -156,6 +164,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // hech kim ocha olmaydi — chiqish rostdan ham chiqish bo'lsin.
       await cache.clearAll().catch(() => {});
       productStore.setShop(null);
+      customerStore.setShop(null);
       outbox.setShop(null);
       setUser(null); setShop(null);
     },

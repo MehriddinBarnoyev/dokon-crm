@@ -101,6 +101,13 @@ export function setUnauthorizedHandler(fn: (() => void) | null) {
 }
 
 export class ApiError extends Error {
+  /**
+   * Vaqt tugab so'rov uzildi (ulanish bor edi, javob yo'q). Uyqudagi
+   * serverni qayta urinib ko'rish kerakligini shu ajratadi — internet
+   * umuman yo'qligidan farqli o'laroq.
+   */
+  uyquBolishiMumkin = false;
+
   constructor(
     message: string,
     readonly status: number,
@@ -115,10 +122,59 @@ interface RequestOptions {
   body?: unknown;
   /** AI so'rovlari sekinroq — ularga kengroq vaqt beramiz. */
   timeoutMs?: number;
+  /**
+   * Server uyqudan uyg'onayotgan bo'lsa bir marta qayta urinilsinmi.
+   *
+   * Sukut bo'yicha faqat GET uchun: POST ni qayta yuborish xavfli —
+   * server so'rovni OLGAN, lekin javob yetib kelmagan bo'lishi mumkin
+   * va amal ikki marta bajarilardi. (Savdo/qarz/chiqim baribir
+   * `lib/outbox` orqali, o'z idempotentlik kaliti bilan ketadi.)
+   */
+  qaytaUrin?: boolean;
 }
+
+/**
+ * SERVER UYQUSI.
+ *
+ * Render'ning bepul rejasi 15 daqiqa harakatsizlikdan keyin servisni
+ * uxlatadi; keyingi so'rov serverni uyg'otadi va bu ~50 soniya oladi.
+ * Kutish muddati 20 soniya edi — ya'ni kunning BIRINCHI amali (kirish,
+ * bosh sahifa) DOIM "Server javob bermadi" bilan tugardi, ikkinchi
+ * urinishda esa ishlab ketardi. Do'konchi uchun bu "ilova buzuq"
+ * degani.
+ *
+ * Shuning uchun vaqt tugaganda bir marta, kengroq muddat bilan qayta
+ * urinamiz. E'TIBOR: bu faqat AbortError da, ya'ni ULANDIK, lekin
+ * javob kelmadi holatida. Internet umuman yo'q bo'lsa fetch tezda
+ * boshqa xato bilan yiqiladi va biz kutib o'tirmaymiz.
+ *
+ * 45 soniya — `api/auth.tsx` dagi `UYQU_TIMEOUT` bilan bir xil. Birinchi
+ * urinishning 20 soniyasi ham uyg'onish vaqtiga ketgan, ya'ni jami 65
+ * soniya: Render'ning ~50 soniyasidan kengroq, lekin "server o'lgan"
+ * holatida ekranni cheksiz ushlab turadigan darajada emas.
+ */
+const UYGONISH_MS = 45_000;
 
 export async function api<T = any>(path: string, opts: RequestOptions = {}): Promise<T> {
   const { method = 'GET', body, timeoutMs = 20000 } = opts;
+  const qaytaUrin = opts.qaytaUrin ?? method === 'GET';
+
+  try {
+    return await soraw<T>(path, method, body, timeoutMs);
+  } catch (e) {
+    // `status === 0` va "javob bermadi" — aynan vaqt tugagani.
+    const vaqtTugadi = e instanceof ApiError && e.status === 0 && e.uyquBolishiMumkin;
+    if (!vaqtTugadi || !qaytaUrin) throw e;
+    return soraw<T>(path, method, body, UYGONISH_MS);
+  }
+}
+
+async function soraw<T>(
+  path: string,
+  method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
+  body: unknown,
+  timeoutMs: number,
+): Promise<T> {
   const token = await getToken();
 
   const controller = new AbortController();
@@ -156,7 +212,10 @@ export async function api<T = any>(path: string, opts: RequestOptions = {}): Pro
   } catch (e: any) {
     if (e instanceof ApiError) throw e;
     if (e?.name === 'AbortError') {
-      throw new ApiError('Server javob bermadi. Internetni tekshiring.', 0);
+      // Ulandik, lekin javob kelmadi — server uyg'onayotgan bo'lishi mumkin.
+      const err = new ApiError('Server javob bermadi. Internetni tekshiring.', 0);
+      err.uyquBolishiMumkin = true;
+      throw err;
     }
     // HTTPS da eng ko'p uchraydigan sabab — qurilma sertifikatga ishonmasligi.
     const hint = BASE_URL.startsWith('https')

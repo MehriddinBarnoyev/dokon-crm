@@ -7,15 +7,19 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { api } from '../../src/api/client';
+import { useAuth } from '../../src/api/auth';
 import type { PaymentMethod, Product } from '../../src/api/types';
 import { Button, Empty } from '../../src/components/ui';
 import { ModalHeader } from '../../src/components/ScreenHeader';
 import { useConfirm } from '../../src/components/Confirm';
 import { useToast } from '../../src/components/Toast';
 import { CustomerPicker, type PickedCustomer } from '../../src/components/CustomerPicker';
+import { ShtrixSkaner } from '../../src/components/ShtrixSkaner';
 import { search as fuzzySearch } from '../../src/lib/search';
 import * as productStore from '../../src/data/products';
 import * as outbox from '../../src/lib/outbox';
+import * as chek from '../../src/lib/chek';
+import { haptic } from '../../src/lib/haptics';
 import { colors, elevation, family, font, money, qty as fq, radius, spacing } from '../../src/theme';
 import { Icon } from '../../src/components/Icon';
 
@@ -168,6 +172,7 @@ function CartRow({ line, onQty, onPrice, onJami, onRemove }: {
 
 export default function NewSaleScreen() {
   const router = useRouter();
+  const { user, shop } = useAuth();
   const confirm = useConfirm();
   const toast = useToast();
   const [products, setProducts] = useState<Product[]>([]);
@@ -178,6 +183,7 @@ export default function NewSaleScreen() {
   // Shunda keyin "bu mijoz nima olgan edi?" degan savolga javob bo'ladi.
   const [customer, setCustomer] = useState<PickedCustomer | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [skanerOchiq, setSkanerOchiq] = useState(false);
   const [busy, setBusy] = useState(false);
 
   /**
@@ -212,6 +218,54 @@ export default function NewSaleScreen() {
     // miqdorini darhol o'zgartiradi, uni ro'yxat oxiridan qidirishi shart emas.
     setCart((c) => [{ product: p, qty: '1', price: String(p.sale_price) }, ...c]);
     setSearch('');
+  }
+
+  /**
+   * Shtrix-kod o'qildi.
+   *
+   * Savatda allaqachon bo'lsa MIQDOR OSHADI — bu kassadagi eng ko'p
+   * uchraydigan holat: bir xil mahsulotning uchtasi ketma-ket o'tkaziladi.
+   * Har safar yangi qator ochilsa, savat bir xil nomlar bilan to'lib
+   * ketardi va do'konchi ularni qo'lda qo'shishga majbur bo'lardi.
+   *
+   * Miqdor faqat BUTUN qatorlarda oshiriladi: do'konchi "0.5 kg" yozib
+   * qo'ygan bo'lsa, skan uni 1.5 kg ga aylantirib yubormasligi kerak.
+   */
+  function skanQabul(code: string) {
+    setSkanerOchiq(false);
+    if (!code) return;
+
+    // Mahsulotning bir nechta kodi bo'lishi mumkin — `barcodes` ichida
+    // asosiysi ham bor. `barcode` ga qaytish eski keshdagi (hali yangi
+    // sync o'tmagan) yozuvlar uchun.
+    const topildi = products.find((p) =>
+      p.barcodes?.includes(code) || (p.barcode ?? '').trim() === code);
+    if (!topildi) {
+      haptic.xato();
+      toast.xato(`Shtrix-kod topilmadi: ${code}`);
+      // Kodni qidiruvga qo'yamiz — do'konchi nomi bilan qidirib, keyin
+      // mahsulotga shu kodni biriktirib qo'yishi mumkin.
+      setSearch(code);
+      return;
+    }
+
+    const bor = cart.find((l) => l.product.id === topildi.id);
+    if (!bor) {
+      add(topildi);
+      haptic.ok();
+      return;
+    }
+
+    const hozir = Number(bor.qty);
+    if (Number.isInteger(hozir) && hozir > 0) {
+      update(topildi.id, { qty: String(hozir + 1), jami: undefined });
+      haptic.ok();
+    } else {
+      // Kasrli miqdor: qo'shib yuborish "0.5 kg" ni "1.5 kg" qilardi.
+      // Jim turgandan ko'ra aytgan to'g'ri — do'konchi skan ishlamadi deb
+      // qayta-qayta urinardi.
+      toast.info(`${topildi.name} savatda (${bor.qty}). Miqdorni qo'lda o'zgartiring.`);
+    }
   }
 
   function update(id: string, patch: Partial<CartLine>) {
@@ -301,7 +355,36 @@ export default function NewSaleScreen() {
       } else {
         toast.info("Savdo navbatga qo'yildi — ulanish bo'lishi bilan yuboriladi");
       }
-      router.back();
+
+      /*
+       * Chek SAVATDAN yig'iladi, serverdan qayta so'ralmaydi: savdo
+       * navbatga tushgan bo'lishi mumkin, chek esa xaridor ketguncha
+       * kerak. Raqam — server bergan savdo id'sidan, u yo'q bo'lsa
+       * mutatsiya uuid'sidan.
+       */
+      const tolangan = payment === 'qarz' ? 0 : total;
+      chek.saqla({
+        raqam: chek.chekRaqami(res.serverId ?? res.mutatsiyaId),
+        dokon: shop?.name ?? "Do'kon",
+        sana: new Date().toISOString(),
+        sotuvchi: user?.name ?? null,
+        mijoz: customer?.name ?? null,
+        qatorlar: cart.map((l) => ({
+          nom: l.product.name,
+          miqdor: Number(l.qty) || 0,
+          birlik: l.product.unit,
+          narx: Number(l.price) || 0,
+          summa: qatorJami(l),
+        })),
+        jami: total,
+        tolangan,
+        qarz: Math.max(total - tolangan, 0),
+        usul: payment,
+        yuborildi: res.yuborildi,
+      });
+
+      // `replace` — orqaga bosganda savat qayta ochilmasin, savdo tugadi.
+      router.replace('/chek');
     } catch (e: any) {
       toast.xato(`Saqlab bo'lmadi: ${e.message}`);
     } finally {
@@ -323,13 +406,24 @@ export default function NewSaleScreen() {
           contentContainerStyle={s.list}
           ListHeaderComponent={
             <View style={{ gap: spacing.sm, marginBottom: spacing.md }}>
-              <TextInput
-                style={s.search}
-                placeholder="Mahsulot qidirish…"
-                placeholderTextColor={colors.textFaint}
-                value={search}
-                onChangeText={setSearch}
-              />
+              <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+                <TextInput
+                  style={[s.search, { flex: 1 }]}
+                  placeholder="Mahsulot qidirish…"
+                  placeholderTextColor={colors.textFaint}
+                  value={search}
+                  onChangeText={setSearch}
+                />
+                {/* Nomni yozgandan ko'ra kodni o'qigan tez — navbat turganda muhim. */}
+                <Pressable
+                  onPress={() => { haptic.tap(); setSkanerOchiq(true); }}
+                  style={s.skanTugma}
+                  hitSlop={6}
+                  accessibilityLabel="Shtrix-kodni o'qish"
+                >
+                  <Icon name="shtrix" size={22} color={colors.primary} />
+                </Pressable>
+              </View>
               {search.length > 0 && (
                 <View style={s.suggestions}>
                   {taxminiy && filtered.length > 0 && (
@@ -451,6 +545,13 @@ export default function NewSaleScreen() {
         )}
       </KeyboardAvoidingView>
 
+      <ShtrixSkaner
+        visible={skanerOchiq}
+        onScan={skanQabul}
+        onClose={() => setSkanerOchiq(false)}
+        hint="Mahsulot shtrix-kodini ramka ichiga tuting"
+      />
+
       <CustomerPicker
         visible={pickerOpen}
         value={customer}
@@ -471,6 +572,12 @@ const s = StyleSheet.create({
     paddingHorizontal: spacing.md, height: 48, fontSize: 16,
     fontFamily: 'Inter_500Medium',
     color: colors.text, borderWidth: 1, borderColor: colors.border,
+  },
+  skanTugma: {
+    width: 48, height: 48, borderRadius: radius.md,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: colors.surface,
+    borderWidth: 1, borderColor: colors.border,
   },
   suggestions: {
     backgroundColor: colors.surface, borderRadius: radius.md,

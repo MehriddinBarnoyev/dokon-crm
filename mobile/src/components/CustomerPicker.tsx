@@ -18,6 +18,7 @@ import {
   StyleSheet, Text, TextInput, View,
 } from 'react-native';
 import { api } from '../api/client';
+import * as customerStore from '../data/customers';
 import { search as fuzzySearch } from '../lib/search';
 import { Button } from './ui';
 import { useToast } from './Toast';
@@ -29,12 +30,8 @@ export interface PickedCustomer {
   name: string;
 }
 
-interface CustomerRow {
-  id: string;
-  name: string;
-  phone: string | null;
-  balance?: number;
-}
+/** Ombordagi tur bilan AYNAN bir xil bo'lishi uchun o'sha yerdan olinadi. */
+type CustomerRow = customerStore.Customer;
 
 export function CustomerPicker({ visible, value, onPick, onClose }: {
   visible: boolean;
@@ -68,7 +65,9 @@ export function CustomerPicker({ visible, value, onPick, onClose }: {
     if (!visible) { setKbBalandlik(0); return; }
     setQ('');
     setYangiTel(null);
-    api<CustomerRow[]>('/debts/customers').then(setAll).catch(() => setAll([]));
+    // Keshdan darhol, so'ng fon so'rovi yangilaydi. Internet yo'q bo'lsa
+    // ham oxirgi ma'lum ro'yxat ko'rinadi — `data/customers.ts`.
+    customerStore.loadAndRefresh(setAll).then(setAll).catch(() => {});
   }, [visible]);
 
   /** Yangi mijozni DARHOL bazaga qo'shadi va tanlaydi. */
@@ -82,6 +81,7 @@ export function CustomerPicker({ visible, value, onPick, onClose }: {
         body: { name: ism, phone: yangiTel?.trim() || null },
       });
       setAll((x) => [c, ...x]);
+      await customerStore.qosh(c);
       onPick({ id: c.id, name: c.name });
       onClose();
     } catch (e: any) {

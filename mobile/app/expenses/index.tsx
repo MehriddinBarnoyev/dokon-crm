@@ -11,6 +11,7 @@ import { RefreshControl, ScrollView, SectionList, StyleSheet, Text, View } from 
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { api } from '../../src/api/client';
+import { useKeshlangan } from '../../src/lib/keshRoyxat';
 import type { Expense } from '../../src/api/types';
 import { Chip, Empty, IconButton } from '../../src/components/ui';
 import { ScreenHeader } from '../../src/components/ScreenHeader';
@@ -39,17 +40,18 @@ function kunNomi(iso: string): string {
 
 export default function ExpensesScreen() {
   const router = useRouter();
-  const [items, setItems] = useState<Expense[] | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [kun, setKun] = useState<number>(30);
   const [kategoriya, setKategoriya] = useState<string | null>(null);
 
-  const load = useCallback(async (kunlar: number) => {
-    const from = kunKaliti(new Date(Date.now() - (kunlar - 1) * 864e5));
-    setItems(await api<Expense[]>(`/expenses?from=${from}&limit=500`));
-  }, []);
+  // Har bir davr — o'z kesh kaliti bilan.
+  const olib = useCallback(() => {
+    const from = kunKaliti(new Date(Date.now() - (kun - 1) * 864e5));
+    return api<Expense[]>(`/expenses?from=${from}&limit=500`);
+  }, [kun]);
+  const { data: items, yangila: load } = useKeshlangan<Expense[]>(`expenses.${kun}`, olib);
 
-  useFocusEffect(useCallback(() => { load(kun).catch(() => {}); }, [load, kun]));
+  useFocusEffect(useCallback(() => { load().catch(() => {}); }, [load]));
 
   /** Kategoriya taqsimoti — filtrdan OLDIN, ya'ni chip'lar doim to'liq. */
   const kategoriyalar = useMemo(() => {
@@ -106,7 +108,7 @@ export default function ExpensesScreen() {
           {DAVRLAR.map((d) => (
             <Chip
               key={d.kun} label={d.label} active={kun === d.kun}
-              onPress={() => { setKun(d.kun); setItems(null); }}
+              onPress={() => setKun(d.kun)}
             />
           ))}
         </ScrollView>
@@ -155,7 +157,7 @@ export default function ExpensesScreen() {
             <RefreshControl
               refreshing={refreshing} tintColor={colors.primary}
               onRefresh={async () => {
-                setRefreshing(true); await load(kun).catch(() => {}); setRefreshing(false);
+                setRefreshing(true); await load().catch(() => {}); setRefreshing(false);
               }}
             />
           }

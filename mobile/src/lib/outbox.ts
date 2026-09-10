@@ -47,9 +47,11 @@ const RAD = 'outbox.rejected';
 const PARTIYA = 50;
 
 interface FlushResult {
+  /** MUTATSIYA id'si (mijoz bergan), server yozuvi emas. */
   id: string;
   ok: boolean;
-  result?: { warnings?: string[]; summary?: string };
+  /** `result.id` — serverda yaratilgan yozuv (savdo, qarz…) id'si. */
+  result?: { warnings?: string[]; summary?: string; id?: string };
   error?: string;
   retryable?: boolean;
 }
@@ -109,7 +111,15 @@ export async function enqueue(
   kind: string,
   body: Record<string, unknown>,
   label: string,
-): Promise<{ yuborildi: boolean; warnings: string[]; error?: string }> {
+): Promise<{
+  yuborildi: boolean;
+  warnings: string[];
+  error?: string;
+  /** Serverda yaratilgan yozuv id'si — faqat yuborilgan bo'lsa. */
+  serverId?: string;
+  /** Mijoz bergan uuid. Yuborilmagan bo'lsa chek raqami shundan olinadi. */
+  mutatsiyaId: string;
+}> {
   await yukla();
 
   const m: Mutation = {
@@ -131,6 +141,8 @@ export async function enqueue(
       yuborildi: meniki.ok,
       warnings: meniki.result?.warnings ?? [],
       error: meniki.error,
+      serverId: meniki.result?.id,
+      mutatsiyaId: m.id,
     };
   }
 
@@ -141,10 +153,14 @@ export async function enqueue(
   const hamon = navbat.some((x) => x.id === m.id);
   if (!hamon) {
     const rad = radEtilgan.find((r) => r.id === m.id);
-    if (rad) return { yuborildi: false, warnings: [], error: rad.error };
-    return { yuborildi: true, warnings: [] };
+    if (rad) {
+      return { yuborildi: false, warnings: [], error: rad.error, mutatsiyaId: m.id };
+    }
+    // Boshqa flush yubordi — natijasi bizga qaytmadi, demak server
+    // id'si ham yo'q. Chek mutatsiya id'si bilan chiqadi.
+    return { yuborildi: true, warnings: [], mutatsiyaId: m.id };
   }
-  return { yuborildi: false, warnings: [] };
+  return { yuborildi: false, warnings: [], mutatsiyaId: m.id };
 }
 
 /**

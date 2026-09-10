@@ -6,6 +6,14 @@ export interface Shop { id: string; name: string; currency: string }
 
 export interface Product {
   id: string; name: string; barcode: string | null; unit: Unit;
+  /**
+   * Mahsulotning BARCHA shtrix-kodlari: asosiy (`barcode`) + qo'shimchalari.
+   *
+   * Ayni mahsulot har xil partiyada har xil kod bilan keladi ("Fanta 1L"
+   * eski va yangi qadoqda). Skaner shu ro'yxat bo'yicha qidiradi.
+   * Server `/sync/products` da beradi, shuning uchun oflaynda ham bor.
+   */
+  barcodes?: string[];
   cost_price: number; sale_price: number; stock: number; min_stock: number;
   photo_url: string | null; category: string | null;
   /** Qidiruvda: true bo'lsa aniq moslik emas, taxminiy variant. */

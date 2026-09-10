@@ -12,7 +12,7 @@ import { AnimatedMoney } from '../../src/components/AnimatedNumber';
 import { PressScale } from '../../src/components/Press';
 import { useToast } from '../../src/components/Toast';
 import {
-  colors, font, money, palette, qty, radius, sana, spacing,
+  colors, dateLabel, font, money, palette, qty, radius, sana, spacing,
 } from '../../src/theme';
 import { Icon } from '../../src/components/Icon';
 
@@ -27,7 +27,28 @@ interface DailyRow {
 interface TopRow {
   name: string; unit: string; total_qty: number;
   revenue: number; profit: number; sale_count: number;
+  /** Foyda tushumga nisbatan, foizda. Tushum 0 bo'lsa `null`. */
+  margin: number | null;
 }
+
+/** Tan narxidan arzon ketgan savdo. */
+interface LossRow {
+  id: string; total: number; cost_total: number; profit: number;
+  created_at: string; customer_name: string | null; items_text: string | null;
+}
+
+/**
+ * Mahsulotlarni nima bo'yicha saralash.
+ *
+ * Tushum bo'yicha birinchi turgan mahsulot eng ko'p FOYDA keltirgani emas:
+ * un yoki shakar katta summaga sotiladi, lekin ustamasi bir necha foiz.
+ * Do'konchining asl savoli "nima ko'p pul OLIB KELADI" — shuning uchun
+ * ikkinchi tartib ham kerak.
+ */
+const SARALASH = [
+  { key: 'tushum', label: 'Tushum' },
+  { key: 'foyda',  label: 'Foyda' },
+] as const;
 interface InvValue {
   product_count: number; cost_value: number; retail_value: number;
   out_of_stock: number; low_stock: number;
@@ -46,21 +67,36 @@ export default function ReportsScreen() {
   const [daily, setDaily] = useState<DailyRow[] | null>(null);
   const [top, setTop] = useState<TopRow[] | null>(null);
   const [inv, setInv] = useState<InvValue | null>(null);
+  const [loss, setLoss] = useState<LossRow[] | null>(null);
+  const [saralash, setSaralash] = useState<'tushum' | 'foyda'>('tushum');
   const [refreshing, setRefreshing] = useState(false);
 
   const [insight, setInsight] = useState<string | null>(null);
   const [thinking, setThinking] = useState(false);
 
-  const load = useCallback(async (d: number) => {
-    const [a, b, c] = await Promise.all([
+  const load = useCallback(async (d: number, tartib: 'tushum' | 'foyda') => {
+    const [a, b, c, e] = await Promise.all([
       api<DailyRow[]>(`/reports/daily?days=${d}`),
-      api<TopRow[]>(`/reports/top-products?days=${d}`),
+      api<TopRow[]>(`/reports/top-products?days=${d}&sort=${tartib}`),
       api<InvValue>('/reports/inventory-value'),
+      /*
+       * `.catch` SHART. Bu marshrut serverning yangi versiyasida paydo
+       * bo'ldi; eskisida 404 qaytadi va `Promise.all` BUTUN yuklashni
+       * yiqitardi — hisobot ekrani abadiy skeletonda qolardi.
+       *
+       * Ilova serverdan oldin yangilanishi oddiy hol (APK qo'lda
+       * tarqatiladi), shuning uchun yangi marshrut yo'qligi ekranni
+       * buzmasligi kerak: ro'yxat bo'sh bo'lsa bo'limning o'zi
+       * ko'rsatilmaydi.
+       */
+      api<LossRow[]>(`/reports/loss-sales?days=${d}`).catch(() => [] as LossRow[]),
     ]);
-    setDaily(a); setTop(b); setInv(c);
+    setDaily(a); setTop(b); setInv(c); setLoss(e);
   }, []);
 
-  useFocusEffect(useCallback(() => { load(days).catch(() => {}); }, [load, days]));
+  useFocusEffect(useCallback(() => {
+    load(days, saralash).catch(() => {});
+  }, [load, days, saralash]));
 
   async function askAi() {
     setThinking(true);
@@ -121,7 +157,7 @@ export default function ReportsScreen() {
           <RefreshControl
             refreshing={refreshing} tintColor={colors.primary}
             onRefresh={async () => {
-              setRefreshing(true); await load(days).catch(() => {}); setRefreshing(false);
+              setRefreshing(true); await load(days, saralash).catch(() => {}); setRefreshing(false);
             }}
           />
         }
@@ -283,7 +319,17 @@ export default function ReportsScreen() {
             {/* Eng ko'p sotilganlar */}
             {top && top.length > 0 && (
               <>
-                <SectionTitle>Eng ko'p sotilganlar</SectionTitle>
+                <SectionTitle>
+                  {saralash === 'foyda' ? "Eng ko'p foyda keltirganlar" : "Eng ko'p sotilganlar"}
+                </SectionTitle>
+                <View style={s.saralashQator}>
+                  {SARALASH.map((t) => (
+                    <Chip
+                      key={t.key} label={t.label} active={saralash === t.key}
+                      onPress={() => setSaralash(t.key)}
+                    />
+                  ))}
+                </View>
                 <Card style={{ gap: spacing.md }}>
                   {top.map((p, i) => (
                     <View key={`${p.name}-${i}`} style={s.topRow}>
@@ -298,6 +344,12 @@ export default function ReportsScreen() {
                         </Text>
                         <Text style={[font.tiny, { color: colors.textMuted }]}>
                           {qty(p.total_qty)} {p.unit} · {p.sale_count} marta
+                          {/* Ustama — "ko'p sotiladi, lekin foydasi kam" ni
+                              bir qarashda ko'rsatadi. */}
+                          {/* `!= null` — eski serverda bu maydon UMUMAN
+                              kelmaydi, `undefined !== null` esa rost bo'lib
+                              "ustama undefined%" chiqarardi. */}
+                          {p.margin != null ? ` · ustama ${p.margin}%` : ''}
                         </Text>
                       </View>
                       <View style={{ alignItems: 'flex-end' }}>
@@ -319,6 +371,43 @@ export default function ReportsScreen() {
             )}
 
             {/* Kunlar bo'yicha */}
+            {loss && loss.length > 0 && (
+              <>
+                <SectionTitle>Zarariga ketgan savdolar</SectionTitle>
+                <Card style={{ gap: spacing.md }}>
+                  {/* Do'kondagi eng jim yo'qotish: narx xato yozilgan yoki
+                      tan narx yangilangandan keyin sotuv narxi eskiligicha
+                      qolgan. Kunlik yakunda ko'rinmaydi — foyda umumiy
+                      bo'lib qo'shilib ketadi. */}
+                  <Text style={[font.tiny, { color: colors.textMuted }]}>
+                    Tan narxidan arzon ketgan {loss.length} ta savdo.
+                    Sotuv narxini tekshiring.
+                  </Text>
+                  {loss.slice(0, 8).map((r) => (
+                    <View key={r.id} style={s.topRow}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={[font.body, { color: colors.text }]} numberOfLines={1}>
+                          {r.items_text ?? 'Savdo'}
+                        </Text>
+                        <Text style={[font.tiny, { color: colors.textMuted }]}>
+                          {dateLabel(r.created_at)}
+                          {r.customer_name ? ` · ${r.customer_name}` : ''}
+                        </Text>
+                      </View>
+                      <View style={{ alignItems: 'flex-end' }}>
+                        <Text style={[font.num, { color: colors.text }]}>
+                          {money(r.total)}
+                        </Text>
+                        <Text style={[font.tiny, { color: colors.danger }]}>
+                          {money(r.profit)}
+                        </Text>
+                      </View>
+                    </View>
+                  ))}
+                </Card>
+              </>
+            )}
+
             <SectionTitle>Kunlar bo'yicha</SectionTitle>
             <Card style={{ paddingVertical: spacing.sm }}>
               <View style={s.dayHead}>
@@ -400,6 +489,9 @@ const s = StyleSheet.create({
     borderTopWidth: 1, borderTopColor: colors.borderSoft,
   },
   cell: { width: '47%' },
+  saralashQator: {
+    flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.sm,
+  },
   aiCard: {
     borderRadius: radius.lg, padding: spacing.lg,
     borderWidth: 1, borderColor: colors.accentLine,

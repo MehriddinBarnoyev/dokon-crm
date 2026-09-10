@@ -10,6 +10,7 @@ import { Badge, Button, Card, Field, IconButton, Stat } from '../../src/componen
 import { ScreenHeader } from '../../src/components/ScreenHeader';
 import { SkeletonCard, SkeletonList } from '../../src/components/Skeleton';
 import { useConfirm } from '../../src/components/Confirm';
+import { ShtrixSkaner } from '../../src/components/ShtrixSkaner';
 import { useToast } from '../../src/components/Toast';
 import { colors, dateLabel, font, money, qty, radius, spacing } from '../../src/theme';
 import { Icon } from '../../src/components/Icon';
@@ -33,12 +34,70 @@ export default function ProductDetail() {
   const [newCost, setNewCost] = useState('');
   const [newSale, setNewSale] = useState('');
   const [busy, setBusy] = useState(false);
+  const [skanerOchiq, setSkanerOchiq] = useState(false);
 
   const load = useCallback(async () => {
     setP(await api<Detail>(`/products/${id}`));
   }, [id]);
 
   useFocusEffect(useCallback(() => { load().catch(() => {}); }, [load]));
+
+  /**
+   * Skanerdan kelgan kodni mahsulotga biriktiradi.
+   *
+   * Server kodni boshqa mahsulot egallab turgan bo'lsa rad etadi — bitta
+   * kod ikki xil javob bersa, kassada qaysi biri to'g'ri ekanini bilib
+   * bo'lmaydi. Uning xabari ("... mahsulotiga biriktirilgan") shundoq
+   * ko'rsatiladi: do'konchi qaysi mahsulot ekanini bilishi kerak.
+   */
+  async function kodQosh(code: string) {
+    setSkanerOchiq(false);
+    if (!code) return;
+
+    if (p?.barcodes?.includes(code)) {
+      toast.info('Bu kod allaqachon shu mahsulotda');
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const res = await api<{ barcodes: string[] }>(`/products/${id}/barcodes`, {
+        method: 'POST', body: { code },
+      });
+      setP((hozir) => (hozir ? { ...hozir, barcodes: res.barcodes } : hozir));
+      // Savdo ekrani mahsulotni MAHALLIY keshdan qidiradi — yangi kod
+      // o'sha yerga tushmasa, skaner uni topa olmasdi.
+      productStore.invalidate();
+      toast.ok('Shtrix-kod qo\'shildi');
+    } catch (e: any) {
+      toast.xato(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function kodOchir(code: string) {
+    const ok = await confirm({
+      title: 'Shtrix-kodni olib tashlash',
+      icon: 'shtrix',
+      lines: [code, `${p!.name} endi bu kod bo'yicha topilmaydi`],
+      confirmText: 'Olib tashlash',
+      destructive: true,
+    });
+    if (!ok) return;
+
+    setBusy(true);
+    try {
+      const res = await api<{ barcodes: string[] }>(
+        `/products/${id}/barcodes/${encodeURIComponent(code)}`, { method: 'DELETE' });
+      setP((hozir) => (hozir ? { ...hozir, barcodes: res.barcodes } : hozir));
+      productStore.invalidate();
+    } catch (e: any) {
+      toast.xato(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function saveAdjust() {
     const v = Number(newStock);
@@ -394,7 +453,6 @@ export default function ProductDetail() {
           <View style={{ gap: spacing.sm }}>
             <Qator label="O'lchov birligi" value={p.unit} />
             <Qator label="Kategoriya" value={p.category} />
-            <Qator label="Shtrix-kod" value={p.barcode} mono />
             <Qator
               label="Ogohlantirish chegarasi"
               value={Number(p.min_stock) > 0
@@ -402,6 +460,47 @@ export default function ProductDetail() {
                 : null}
             />
           </View>
+        </Card>
+
+        {/* ---------- Shtrix-kodlar ----------
+            Bitta mahsulotning bir nechta kodi bo'ladi: ayni "Fanta 1L"
+            eski va yangi partiyada boshqa-boshqa kod bilan keladi.
+            Ilgari faqat bittasi saqlanardi va qolganini skanerlaganda
+            kassada "topilmadi" chiqardi. */}
+        <Card style={{ gap: spacing.md }}>
+          <View style={s.kartaBosh}>
+            <Text style={[font.label, { color: colors.textMuted, flex: 1 }]}>
+              SHTRIX-KODLAR
+            </Text>
+            <Button
+              title="Skanerlash" icon="shtrix" variant="soft" size="sm" full={false}
+              disabled={busy}
+              onPress={() => setSkanerOchiq(true)}
+            />
+          </View>
+
+          {(p.barcodes ?? []).length === 0 ? (
+            <Text style={[font.small, { color: colors.textMuted }]}>
+              Kod biriktirilmagan. Skanerlab qo'shsangiz, savdoda mahsulotni
+              nomi bilan qidirish shart bo'lmaydi.
+            </Text>
+          ) : (
+            <View style={{ gap: spacing.xs }}>
+              {(p.barcodes ?? []).map((code) => (
+                <View key={code} style={s.kodQator}>
+                  <Icon name="shtrix" size={18} color={colors.textMuted} />
+                  <Text style={[font.mono, { color: colors.text, flex: 1 }]}>
+                    {code}
+                  </Text>
+                  <IconButton
+                    name="yopish" label={`${code} kodini olib tashlash`}
+                    tone="danger" size={18}
+                    onPress={() => kodOchir(code)}
+                  />
+                </View>
+              ))}
+            </View>
+          )}
         </Card>
 
         {/* ---------- Harakatlar tarixi ---------- */}
@@ -447,6 +546,13 @@ export default function ProductDetail() {
           ))}
         </Card>
       </ScrollView>
+
+      <ShtrixSkaner
+        visible={skanerOchiq}
+        onScan={kodQosh}
+        onClose={() => setSkanerOchiq(false)}
+        hint={`${p.name} uchun shtrix-kodni ramka ichiga tuting`}
+      />
     </SafeAreaView>
   );
 }
@@ -475,6 +581,12 @@ const s = StyleSheet.create({
   },
   /** Karta sarlavhasi: chapda nom, o'ngda kichik amal tugmasi. */
   kartaBosh: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  kodQator: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: radius.md,
+    paddingVertical: spacing.sm, paddingHorizontal: spacing.md,
+  },
   rowGap: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   qoldiqQator: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   photo: { width: 64, height: 64, borderRadius: radius.md },

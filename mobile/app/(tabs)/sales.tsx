@@ -10,6 +10,10 @@ import { ScreenHeader } from '../../src/components/ScreenHeader';
 import { SkeletonList } from '../../src/components/Skeleton';
 import { PressScale } from '../../src/components/Press';
 import { useConfirm } from '../../src/components/Confirm';
+import { useKeshlangan } from '../../src/lib/keshRoyxat';
+import * as chek from '../../src/lib/chek';
+import { useAuth } from '../../src/api/auth';
+import { Button } from '../../src/components/ui';
 import { useToast } from '../../src/components/Toast';
 import {
   colors, dateLabel, elevation, font, kunKaliti, money, qty, radius,
@@ -29,15 +33,15 @@ function kunNomi(iso: string): string {
 
 export default function SalesScreen() {
   const router = useRouter();
+  const { shop } = useAuth();
   const confirm = useConfirm();
   const toast = useToast();
-  const [items, setItems] = useState<Sale[] | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setItems(await api<Sale[]>('/sales?limit=100'));
-  }, []);
+  // Keshdan darhol chiziladi, so'ng serverdan yangilanadi — `lib/keshRoyxat`.
+  const olib = useCallback(() => api<Sale[]>('/sales?limit=100'), []);
+  const { data: items, yangila: load } = useKeshlangan<Sale[]>('sales', olib);
 
   /**
    * Savdolarni KUNLAR bo'yicha guruhlaymiz va har bir kunga yakun chiqaramiz.
@@ -62,6 +66,38 @@ export default function SalesScreen() {
   useFocusEffect(useCallback(() => { load().catch(() => {}); }, [load]));
 
   const jamiSavdo = (items ?? []).reduce((x, r) => x + Number(r.total), 0);
+
+  /**
+   * Eski savdoning chekini qayta chiqaradi.
+   *
+   * Ma'lumot ro'yxatdagi yozuvdan olinadi — serverga qayta bormaymiz.
+   * Ro'yxatning o'zi keshdan kelgani uchun bu oflaynda ham ishlaydi.
+   */
+  function chekniOch(sale: Sale) {
+    const jami = Number(sale.total);
+    const tolangan = Number(sale.paid);
+    chek.saqla({
+      raqam: chek.chekRaqami(sale.id),
+      dokon: shop?.name ?? "Do'kon",
+      sana: sale.created_at,
+      sotuvchi: sale.seller_name,
+      mijoz: sale.customer_name,
+      qatorlar: (sale.items ?? []).map((i) => ({
+        nom: i.name,
+        miqdor: Number(i.qty),
+        birlik: i.unit,
+        narx: Number(i.unit_price),
+        summa: Number(i.subtotal),
+      })),
+      jami,
+      tolangan,
+      qarz: Math.max(jami - tolangan, 0),
+      usul: sale.payment_method,
+      // Ro'yxatga tushgan savdo serverda bor — navbat ogohlantirishi kerak emas.
+      yuborildi: true,
+    });
+    router.push('/chek');
+  }
 
   async function askCancel(sale: Sale) {
     const qarz = Number(sale.total) - Number(sale.paid);
@@ -153,6 +189,20 @@ export default function SalesScreen() {
           renderItem={({ item }) => {
             const expanded = open === item.id;
             const owed = Number(item.total) - Number(item.paid);
+
+            /*
+             * SHU SAVDODAN QANCHA FOYDA. Ilgari foyda faqat kun bo'yicha
+             * ko'rinardi va bitta zararli savdo kunlik yig'indida
+             * yo'qolib ketardi.
+             *
+             * `cost_total = 0` — tan narx kiritilmagan. Bunday savdoning
+             * "foydasi" butun summaga teng bo'lib chiqadi, ya'ni yolg'on.
+             * Shuning uchun raqam o'rniga ochiq aytamiz.
+             */
+            const tannarx = Number(item.cost_total);
+            const foyda = Number(item.total) - tannarx;
+            const ustama = Number(item.total) > 0
+              ? Math.round((foyda / Number(item.total)) * 100) : 0;
             return (
               <PressScale
                 accessibilityRole="button"
@@ -184,6 +234,19 @@ export default function SalesScreen() {
                   </View>
                 </View>
 
+                {tannarx > 0 ? (
+                  <Text style={[font.tiny, {
+                    color: foyda >= 0 ? colors.success : colors.danger,
+                  }]}>
+                    {foyda >= 0 ? 'Foyda' : 'ZARAR'} {money(Math.abs(foyda))} so'm
+                    <Text style={{ color: colors.textFaint }}>{`  ·  ${ustama}%`}</Text>
+                  </Text>
+                ) : (
+                  <Text style={[font.tiny, { color: colors.textFaint }]}>
+                    Tan narx yo'q — foyda hisoblanmadi
+                  </Text>
+                )}
+
                 {owed > 0 && (
                   <Text style={[font.tiny, { color: colors.warning }]}>
                     Qarz qoldi: {money(owed)} so'm
@@ -202,6 +265,11 @@ export default function SalesScreen() {
                         </Text>
                       </View>
                     ))}
+                    <Button
+                      title="Chek" icon="savdo" variant="soft" size="sm" full={false}
+                      style={{ alignSelf: 'flex-start', marginTop: spacing.xs }}
+                      onPress={() => chekniOch(item)}
+                    />
                     <View style={s.hintRow}>
                       <Icon name="ogohlantirish" size={13} color={colors.textFaint} />
                       <Text style={[font.tiny, { color: colors.textFaint }]}>
