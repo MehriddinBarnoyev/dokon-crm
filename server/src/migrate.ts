@@ -27,6 +27,8 @@ const TARTIB = [
   'schema.sql',
   '002-search.sql',
   '003-search-staged.sql',
+  '004-tezlik.sql',
+  '005-shtrix.sql',
 ];
 
 /** Ulanish xatosimi (bazaga umuman yetib bo'lmadi) yoki boshqa xatomi? */

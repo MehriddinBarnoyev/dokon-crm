@@ -29,7 +29,11 @@ const PRODUCT_COLS = `
   p.id, p.name, p.barcode, p.unit, p.cost_price, p.sale_price,
   p.stock, p.min_stock, p.photo_url, p.is_active,
   p.created_at, p.updated_at,
-  c.name AS category`;
+  c.name AS category,
+  -- Asosiy + qo'shimcha kodlar. Skaner savdo ekranida MAHALLIY keshdan
+  -- qidiradi, shuning uchun kodlar mahsulot bilan birga kelishi shart —
+  -- aks holda qo'shimcha kod faqat internet bor paytda ishlardi.
+  dokon_barcodes(p.id, p.barcode) AS barcodes`;
 
 export default async function syncRoutes(app: FastifyInstance) {
   app.addHook('preHandler', requireAuth);

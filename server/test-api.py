@@ -299,6 +299,40 @@ if len(qtarix) >= 2:
           f"{len(korilgan)} ta")
 
 # --- Aqlli qidiruv ---
+print("\n9c. Foyda tahlili")
+# Tushum bo'yicha birinchi turgan mahsulot eng ko'p FOYDA keltirgani emas.
+# Do'konchining asl savoli shu — shuning uchun ikki xil tartib kerak.
+tushum, _ = call("/reports/top-products?days=365&sort=tushum&limit=10")
+foyda,  _ = call("/reports/top-products?days=365&sort=foyda&limit=10")
+
+check("tushum bo'yicha kamayib boradi",
+      all(float(tushum[i]["revenue"]) >= float(tushum[i + 1]["revenue"])
+          for i in range(len(tushum) - 1)), f"{len(tushum)} ta qator")
+check("foyda bo'yicha kamayib boradi",
+      all(float(foyda[i]["profit"]) >= float(foyda[i + 1]["profit"])
+          for i in range(len(foyda) - 1)), f"{len(foyda)} ta qator")
+check("ustama hisoblanadi",
+      all(r["margin"] is not None or float(r["revenue"]) == 0 for r in tushum))
+
+if tushum:
+    r = tushum[0]
+    kutilgan = round(float(r["profit"]) * 100 / float(r["revenue"]), 1)
+    check("ustama = foyda / tushum",
+          abs(float(r["margin"]) - kutilgan) < 0.05,
+          f"{r['margin']}% ≈ {kutilgan}%")
+
+zarar, _ = call("/reports/loss-sales?days=365")
+check("zarar ro'yxatidagi hammasi minusda",
+      all(float(r["profit"]) < 0 for r in zarar), f"{len(zarar)} ta savdo")
+# Tan narxi kiritilmagan savdo zarar EMAS — u boshqa muammo va
+# ro'yxatga tushsa, haqiqiy zararni ko'mib yuborardi.
+check("tan narxsiz savdolar zarar deb sanalmaydi",
+      all(float(r["cost_total"]) > 0 for r in zarar))
+check("eng katta zarar birinchi",
+      all(float(zarar[i]["profit"]) <= float(zarar[i + 1]["profit"])
+          for i in range(len(zarar) - 1)))
+
+
 print("\n10. Aqlli qidiruv (xato yozilgan / ko'p so'zli nomlar)")
 QIDIRUV = [
     ("piez",       "Piyoz",             "harf tushib qolgan"),
@@ -324,6 +358,63 @@ rows, _ = call("/products?search=" + urllib.parse.quote("televizor"))
 check("mos kelmaydigan so'rov bo'sh qaytaradi", len(rows) == 0, f"{len(rows)} ta")
 
 # --- Himoya ---
+print("\n10b. Bir mahsulotga bir nechta shtrix-kod")
+# Ayni mahsulot har xil partiyada har xil kod bilan keladi. Skaner
+# ularning HAMMASI bo'yicha topishi kerak — aks holda kassada
+# do'konchi nomi bilan qidirishga majbur bo'ladi.
+topilgan, _ = call("/products?search=Coca")
+mahsulot = topilgan[0] if topilgan else None
+check("sinov uchun mahsulot topildi", mahsulot is not None)
+
+if mahsulot:
+    pid = mahsulot["id"]
+    A, Q = "7770000000001", "7770000000002"
+
+    # Toza boshlash: oldingi yurishdan qolgan kodlar bo'lsa olib tashlaymiz
+    for kod in (A, Q):
+        call(f"/products/{pid}/barcodes/{kod}", "DELETE")
+
+    r, st = call(f"/products/{pid}/barcodes", "POST", {"code": A})
+    check("birinchi kod qo'shildi", st == 200 and A in r.get("barcodes", []))
+
+    r, st = call(f"/products/{pid}/barcodes", "POST", {"code": Q})
+    check("ikkinchi kod ham qo'shildi", st == 200 and Q in r.get("barcodes", []),
+          f"{len(r.get('barcodes', []))} ta kod")
+
+    # Ikkalasi ham mahsulotni topishi shart
+    for kod in (A, Q):
+        found, _ = call(f"/products/meta/barcode/{kod}")
+        pr = found.get("product")
+        check(f"{kod} bo'yicha topiladi", pr is not None and pr["id"] == pid)
+
+        rows, _ = call(f"/products?search={kod}")
+        check(f"{kod} qidiruvda aniq moslik",
+              len(rows) > 0 and rows[0]["id"] == pid and float(rows[0]["score"]) == 1.0)
+
+    # Kod telefon keshiga tushishi kerak — busiz oflaynda skaner ishlamaydi
+    sync, _ = call("/sync/products")
+    bizniki = [x for x in sync["products"] if x["id"] == pid]
+    check("sync mahsulot kodlarini beradi",
+          len(bizniki) == 1 and A in bizniki[0].get("barcodes", [])
+          and Q in bizniki[0].get("barcodes", []))
+
+    # Bitta kod ikki mahsulotni bildirsa, kassada qaysi biri to'g'ri
+    # ekanini bilib bo'lmaydi — server buni rad etishi shart.
+    boshqa, _ = call("/products?search=Kartoshka")
+    if boshqa:
+        _, st = call(f"/products/{boshqa[0]['id']}/barcodes", "POST", {"code": A})
+        check("band kod boshqa mahsulotga biriktirilmaydi", st == 409, f"HTTP {st}")
+
+    _, st = call(f"/products/{pid}/barcodes", "POST", {"code": "12"})
+    check("juda qisqa kod rad etiladi", st == 400, f"HTTP {st}")
+
+    r, st = call(f"/products/{pid}/barcodes/{A}", "DELETE")
+    check("kod olib tashlanadi", st == 200 and A not in r.get("barcodes", []))
+    check("qolgan kod joyida", Q in r.get("barcodes", []))
+
+    call(f"/products/{pid}/barcodes/{Q}", "DELETE")
+
+
 print("\n11. Xavfsizlik")
 saved = TOKEN; TOKEN = None
 _, st = call("/products")

@@ -135,25 +135,78 @@ export default async function reportRoutes(app: FastifyInstance) {
     };
   });
 
-  /** Eng ko'p sotilgan mahsulotlar */
+  /**
+   * Eng ko'p sotilgan mahsulotlar.
+   *
+   * `sort` NEGA KERAK. Tushum bo'yicha birinchi turgan mahsulot eng ko'p
+   * FOYDA keltirgani emas: un yoki shakar katta summaga sotiladi, lekin
+   * ustamasi bir necha foiz. Do'konchi "nima ko'p pul olib keladi" degan
+   * savolga javob izlaydi, "nima ko'p pul aylantiradi" ga emas.
+   *
+   * `margin` — foyda tushumga nisbatan, foizda. Bir qatorda ikkita mahsulot
+   * bir xil foyda bergan bo'lishi mumkin, lekin biri 300 ming, ikkinchisi
+   * 3 million aylantirib. Ustama buni darhol ko'rsatadi.
+   */
   app.get('/top-products', async (req) => {
     const q = z.object({
       days: z.coerce.number().min(1).max(365).default(30),
       limit: z.coerce.number().min(1).max(50).default(10),
+      sort: z.enum(['tushum', 'foyda']).default('tushum'),
     }).parse(req.query);
+
+    // Ustunlar ro'yxatdan olinadi — so'rovga tashqaridan matn tushmaydi.
+    const ORDER = { tushum: 'revenue', foyda: 'profit' }[q.sort];
 
     return query(
       `SELECT si.name_snap AS name, si.unit,
               SUM(si.qty)      AS total_qty,
               SUM(si.subtotal) AS revenue,
               SUM(si.subtotal - si.qty * si.cost_price) AS profit,
-              COUNT(DISTINCT s.id) AS sale_count
+              COUNT(DISTINCT s.id) AS sale_count,
+              -- Tushum 0 bo'lsa (bepul berilgan) bo'lishni o'tkazib yuboramiz
+              CASE WHEN SUM(si.subtotal) > 0
+                   THEN ROUND(SUM(si.subtotal - si.qty * si.cost_price)
+                              * 100 / SUM(si.subtotal), 1)
+                   ELSE NULL END AS margin
          FROM sale_items si
          JOIN sales s ON s.id = si.sale_id
         WHERE s.shop_id = $1
           AND s.created_at > now() - ($2::int || ' days')::interval
         GROUP BY si.name_snap, si.unit
-        ORDER BY revenue DESC
+        ORDER BY ${ORDER} DESC
+        LIMIT $3`, [req.auth.shop_id, q.days, q.limit]);
+  });
+
+  /**
+   * ZARAR KELTIRGAN SAVDOLAR — tan narxidan arzon ketganlari.
+   *
+   * Bu do'konda eng jim yo'qotish: narx xato yozilgan, aksiya hisoblanmagan
+   * yoki tan narx yangilangandan keyin sotuv narxi eskiligicha qolgan.
+   * Kunlik yakunda bu ko'rinmaydi — foyda umumiy bo'lib qo'shilib ketadi.
+   *
+   * `cost_total = 0` bo'lganlar ATAYLAB chiqmaydi: ular zarar emas, tan
+   * narxi kiritilmagan mahsulotlar. Ular uchun alohida ogohlantirish bor
+   * (`/products?status=tannarxsiz`).
+   */
+  app.get('/loss-sales', async (req) => {
+    const q = z.object({
+      days: z.coerce.number().min(1).max(365).default(30),
+      limit: z.coerce.number().min(1).max(50).default(20),
+    }).parse(req.query);
+
+    return query(
+      `SELECT s.id, s.total, s.cost_total, s.created_at,
+              (s.total - s.cost_total) AS profit,
+              c.name AS customer_name,
+              (SELECT string_agg(si.name_snap, ', ' ORDER BY si.subtotal DESC)
+                 FROM sale_items si WHERE si.sale_id = s.id) AS items_text
+         FROM sales s
+         LEFT JOIN customers c ON c.id = s.customer_id
+        WHERE s.shop_id = $1
+          AND s.created_at > now() - ($2::int || ' days')::interval
+          AND s.cost_total > 0
+          AND s.total < s.cost_total
+        ORDER BY (s.total - s.cost_total)
         LIMIT $3`, [req.auth.shop_id, q.days, q.limit]);
   });
 

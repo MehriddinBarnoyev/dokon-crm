@@ -105,7 +105,12 @@ export default async function productRoutes(app: FastifyInstance) {
       `SELECT type, qty, stock_after, ref_type, note, created_at
          FROM stock_moves WHERE product_id = $1
         ORDER BY created_at DESC LIMIT 50`, [id]);
-    return { ...p, moves };
+
+    // Asosiy + qo'shimcha kodlar bitta ro'yxatda (`db/005-shtrix.sql`).
+    const kodlar = await one<{ barcodes: string[] }>(
+      `SELECT dokon_barcodes($1, $2) AS barcodes`, [id, (p as any).barcode]);
+
+    return { ...p, moves, barcodes: kodlar?.barcodes ?? [] };
   });
 
   app.post('/', async (req) => {
@@ -212,6 +217,126 @@ export default async function productRoutes(app: FastifyInstance) {
     return res;
   });
 
+  /* ----------------------- Shtrix-kodlar ----------------------- */
+  /*
+   * Bir mahsulotning bir nechta kodi bo'lishi mumkin: ayni "Fanta 1L"
+   * eski va yangi partiyada, boshqa zavodda boshqa kod bilan keladi.
+   * Ilgari faqat bittasi saqlanardi va qolganini skanerlaganda kassada
+   * "topilmadi" chiqardi.
+   *
+   * Model: `products.barcode` — asosiy kod, `product_barcodes` —
+   * qo'shimchalari. Batafsil: `db/005-shtrix.sql`.
+   */
+
+  /** Bir mahsulotga shundan ko'p kod amalda uchramaydi — bu xatodan himoya. */
+  const KOD_CHEGARASI = 20;
+
+  const KodSchema = z.string()
+    .transform((v) => v.trim())
+    .refine((v) => v.length >= 4 && v.length <= 64,
+            { message: "Shtrix-kod 4 dan 64 belgigacha bo'lishi kerak" })
+    .refine((v) => !/\s/.test(v),
+            { message: "Shtrix-kodda bo'sh joy bo'lmaydi" });
+
+  app.post('/:id/barcodes', async (req, reply) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const { code } = z.object({ code: KodSchema }).parse(req.body);
+    const shop = req.auth.shop_id;
+
+    return tx(async (c) => {
+      const p = await one<{ id: string; name: string; barcode: string | null }>(
+        `SELECT id, name, barcode FROM products
+          WHERE id = $1 AND shop_id = $2`, [id, shop], c);
+      if (!p) return reply.code(404).send({ error: 'Mahsulot topilmadi' });
+
+      // Kod BOSHQA mahsulotniki bo'lsa — to'xtaymiz. Kassada bitta kod
+      // ikki xil javob bersa, qaysi biri to'g'ri ekanini bilib bo'lmaydi.
+      const band = await one<{ id: string; name: string }>(
+        `SELECT p.id, p.name FROM products p
+          WHERE p.shop_id = $1 AND p.id <> $2
+            AND (p.barcode = $3
+                 OR EXISTS (SELECT 1 FROM product_barcodes b
+                             WHERE b.product_id = p.id AND b.code = $3))
+          LIMIT 1`, [shop, id, code], c);
+      if (band) {
+        return reply.code(409).send({
+          error: `Bu shtrix-kod "${band.name}" mahsulotiga biriktirilgan`,
+        });
+      }
+
+      // Shu mahsulotning o'zida allaqachon bor — xato emas, shunchaki
+      // qaytadan skanerlangan. Ro'yxatni qaytarib qo'ya qolamiz.
+      const soni = await one<{ n: number }>(
+        `SELECT count(*)::int AS n FROM product_barcodes WHERE product_id = $1`,
+        [id], c);
+      if ((soni?.n ?? 0) >= KOD_CHEGARASI) {
+        return reply.code(400).send({
+          error: `Bitta mahsulotga ko'pi bilan ${KOD_CHEGARASI} ta kod`,
+        });
+      }
+
+      if (p.barcode?.trim() !== code) {
+        await query(
+          `INSERT INTO product_barcodes (shop_id, product_id, code)
+           VALUES ($1, $2, $3) ON CONFLICT (shop_id, code) DO NOTHING`,
+          [shop, id, code], c);
+      }
+
+      // `updated_at` SHART: delta-sync (`/sync/products`) faqat shu
+      // ustunga qaraydi. Busiz yangi kod telefon keshiga tushmasdi va
+      // oflaynda skaner uni topa olmasdi.
+      await query(
+        `UPDATE products SET updated_at = now() WHERE id = $1 AND shop_id = $2`,
+        [id, shop], c);
+
+      const kodlar = await one<{ barcodes: string[] }>(
+        `SELECT dokon_barcodes($1, $2) AS barcodes`, [id, p.barcode], c);
+      return { barcodes: kodlar?.barcodes ?? [] };
+    });
+  });
+
+  /**
+   * Kodni olib tashlash.
+   *
+   * ASOSIY kod o'chirilsa `products.barcode` bo'shatiladi — do'konchi
+   * uchun ro'yxat bitta, qaysi kod qayerda saqlanishi uning ishi emas.
+   */
+  app.delete('/:id/barcodes/:code', async (req, reply) => {
+    const { id, code } = z.object({
+      id: z.string().uuid(),
+      code: KodSchema,
+    }).parse(req.params);
+    const shop = req.auth.shop_id;
+
+    return tx(async (c) => {
+      const p = await one<{ barcode: string | null }>(
+        `SELECT barcode FROM products WHERE id = $1 AND shop_id = $2`,
+        [id, shop], c);
+      if (!p) return reply.code(404).send({ error: 'Mahsulot topilmadi' });
+
+      let asosiy = p.barcode;
+      if (p.barcode?.trim() === code) {
+        await query(
+          `UPDATE products SET barcode = NULL WHERE id = $1 AND shop_id = $2`,
+          [id, shop], c);
+        asosiy = null;
+      } else {
+        await query(
+          `DELETE FROM product_barcodes
+            WHERE product_id = $1 AND shop_id = $2 AND code = $3`,
+          [id, shop, code], c);
+      }
+
+      await query(
+        `UPDATE products SET updated_at = now() WHERE id = $1 AND shop_id = $2`,
+        [id, shop], c);
+
+      const kodlar = await one<{ barcodes: string[] }>(
+        `SELECT dokon_barcodes($1, $2) AS barcodes`, [id, asosiy], c);
+      return { barcodes: kodlar?.barcodes ?? [] };
+    });
+  });
+
   app.get('/meta/categories', async (req) =>
     query(`SELECT id, name FROM categories WHERE shop_id = $1 ORDER BY name`,
       [req.auth.shop_id]));
@@ -228,7 +353,10 @@ export default async function productRoutes(app: FastifyInstance) {
               p.barcode, p.photo_url, c.name AS category
          FROM products p
          LEFT JOIN categories c ON c.id = p.category_id
-        WHERE p.shop_id = $1 AND p.is_active AND p.barcode = btrim($2)
+        WHERE p.shop_id = $1 AND p.is_active
+          AND (p.barcode = btrim($2)
+               OR EXISTS (SELECT 1 FROM product_barcodes b
+                           WHERE b.product_id = p.id AND b.code = btrim($2)))
         LIMIT 1`, [req.auth.shop_id, code]);
     return { product: found ?? null };
   });
