@@ -1,5 +1,7 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import compress from '@fastify/compress';
+import rateLimit from '@fastify/rate-limit';
 import jwt from '@fastify/jwt';
 import multipart from '@fastify/multipart';
 import fastifyStatic from '@fastify/static';
@@ -12,6 +14,7 @@ import { ZodError } from 'zod';
 import { env } from './env.js';
 import { pool } from './db.js';
 import { registerAuthHooks, requireAuth } from './lib/auth.js';
+import { boshlaTozalash } from './lib/tozalash.js';
 import authRoutes from './routes/auth.js';
 import productRoutes from './routes/products.js';
 import saleRoutes from './routes/sales.js';
@@ -49,12 +52,66 @@ const tls = tlsOptions();
 const app = Fastify({
   logger: { level: process.env.LOG_LEVEL ?? 'info' },
   bodyLimit: 15 * 1024 * 1024,   // rasm base64 sig'ishi uchun
+
+  /**
+   * Render (va har qanday reverse-proxy) orqasida `req.ip` proxy'ning
+   * manzilini ko'rsatadi — hamma do'konchi bitta IP dan kelayotgandek.
+   * So'rov chegarasi shunda MA'NOSIZ bo'lardi: bir odamning noto'g'ri
+   * paroli qolganlarni ham bloklardi.
+   *
+   * Faqat BITTA hop ishonchli (bizga to'g'ridan-to'g'ri ulangan proxy).
+   * `true` emas: u holda mijozning o'zi `X-Forwarded-For` yozib
+   * chegaradan o'tib ketishi mumkin edi.
+   */
+  trustProxy: (_address: string, hop: number) => hop === 0,
+
   ...(tls ? { https: tls } : {}),
 });
 
 await mkdir(UPLOAD_DIR, { recursive: true });
 
 await app.register(cors, { origin: true });
+
+/**
+ * GZIP. Do'kondagi internet sekin va o'lchovli, javoblarning kattasi esa
+ * JSON — u 8-10 barobar siqiladi. `/sync/products` da 300 mahsulot ~150 KB
+ * edi, siqilgach ~15 KB. Kassada bu bir necha soniya farq qiladi.
+ *
+ * `threshold` — kichik javobni siqishning ma'nosi yo'q: sarlavha va
+ * protsessor vaqti yutuqdan ko'p bo'lib ketadi.
+ *
+ * `/uploads/` dagi rasmlar allaqachon siqilgan (jpg/png/webp), ularni
+ * qayta siqish faqat protsessorni band qiladi.
+ */
+await app.register(compress, {
+  global: true,
+  threshold: 1024,
+  encodings: ['gzip', 'deflate'],
+  customTypes: /^application\/json/,
+});
+
+/**
+ * SO'ROV CHEGARASI. Global emas — do'konchi kun bo'yi ishlaydi va uni
+ * cheklash noto'g'ri bo'lardi. Chegara faqat parol tekshiriladigan
+ * marshrutlarga qo'yiladi (`routes/auth.ts`), ya'ni parolni ketma-ket
+ * taxmin qilishga qarshi.
+ */
+await app.register(rateLimit, {
+  global: false,
+
+  // Mahalliy ishlab chiqish va `npm run test:api` chegaraga urilmasin:
+  // sinov bir yurishda bir necha marta kiradi. Render orqasida mijozning
+  // manzili hech qachon loopback bo'lmaydi, shuning uchun bu ishlab
+  // turgan serverni zaiflashtirmaydi.
+  allowList: ['127.0.0.1', '::1'],
+  // Xato xabari do'konchi tushunadigan tilda bo'lsin.
+  errorResponseBuilder: (_req, ctx) => ({
+    statusCode: 429,
+    error: 'Juda ko\'p urinish',
+    message: `Juda ko'p urinish. ${Math.ceil(ctx.ttl / 1000)} soniyadan keyin qayta urinib ko'ring.`,
+  }),
+});
+
 await app.register(jwt, { secret: env.jwtSecret, sign: { expiresIn: '90d' } });
 await app.register(multipart, { limits: { fileSize: 12 * 1024 * 1024 } });
 await app.register(fastifyStatic, { root: UPLOAD_DIR, prefix: '/uploads/' });
@@ -116,6 +173,7 @@ await app.register(flushRoutes, { prefix: '/sync' });
 try {
   await app.listen({ port: env.port, host: env.host });
   app.log.info(`Protokol: ${tls ? 'HTTPS' : "HTTP (TLS yo'q)"}`);
+  boshlaTozalash(app.log);
   app.log.info(
     `AI: ${env.aiEnabled ? `yoqilgan (${env.groqTextModel})` : "o'chirilgan (GROQ_API_KEY yo'q)"}`);
 } catch (err) {

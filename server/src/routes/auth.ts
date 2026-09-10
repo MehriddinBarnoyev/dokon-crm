@@ -37,8 +37,28 @@ const LoginBody = z.object({
   password: z.string().min(4),
 });
 
+/**
+ * Parol tekshiriladigan marshrutlar uchun so'rov chegarasi.
+ *
+ * Nega kerak: `/login` ga cheksiz urinish mumkin edi — 4 belgili parol
+ * (`z.string().min(4)`) esa bir necha daqiqada topiladi.
+ *
+ * Chegara IP bo'yicha. Bitta do'konda bir nechta sotuvchi bitta Wi-Fi
+ * orqali kirishi mumkin, shuning uchun raqam qattiq emas: 5 daqiqada
+ * 15 urinish odatdagi ishga xalaqit bermaydi, taxminlashni esa
+ * amalda imkonsiz qiladi.
+ */
+const KIRISH_CHEGARASI = {
+  config: { rateLimit: { max: 15, timeWindow: '5 minutes' } },
+};
+
+/** Ro'yxatdan o'tish kamdan-kam bo'ladi — chegara qattiqroq. */
+const ROYXAT_CHEGARASI = {
+  config: { rateLimit: { max: 5, timeWindow: '1 hour' } },
+};
+
 export default async function authRoutes(app: FastifyInstance) {
-  app.post('/register', async (req, reply) => {
+  app.post('/register', ROYXAT_CHEGARASI, async (req, reply) => {
     const body = RegisterBody.parse(req.body);
 
     // `body.phone` — YangiTel normallashtirib bergan `+998...`. Band-emaslik
@@ -63,7 +83,7 @@ export default async function authRoutes(app: FastifyInstance) {
     return { token, user };
   });
 
-  app.post('/login', async (req, reply) => {
+  app.post('/login', KIRISH_CHEGARASI, async (req, reply) => {
     const body = LoginBody.parse(req.body);
     const phone = telNormal(body.phone);
     const row = await one<{
@@ -81,7 +101,7 @@ export default async function authRoutes(app: FastifyInstance) {
     return { token: app.jwt.sign(user), user };
   });
 
-  app.post('/staff', { preHandler: requireAuth }, async (req, reply) => {
+  app.post('/staff', { preHandler: requireAuth, ...ROYXAT_CHEGARASI }, async (req, reply) => {
     if (req.auth.role !== 'owner') {
       return reply.code(403).send({ error: 'Faqat do\'kon egasi xodim qo\'sha oladi' });
     }
