@@ -124,6 +124,8 @@ export default function HomeScreen() {
           // `?? 0` — eski server hali `debt_given` qaytarmasligi mumkin;
           // busiz NaN chiqib, butun qator jimgina yo'qolardi.
           const qarzgaBerildi = Number(t.credit_total) + Number(t.debt_given ?? 0);
+          // Eski serverda bu maydon yo'q — `?? 0` shuning uchun.
+          const tovargaSarflandi = Number(t.purchase_total ?? 0);
           return (
           <>
             {/* Bugungi asosiy raqam */}
@@ -185,6 +187,25 @@ export default function HomeScreen() {
                   </View>
                 )}
 
+                {/* TOVARGA SARFLANGAN PUL.
+
+                    Nega foydadan ayirilmaydi: mol olish xarajat emas,
+                    pulning tovarga aylanishi. Xarajatga u sotilganda,
+                    tan narx bo'lib aylanadi. Ilgari mol "Chiqim" ga
+                    yozilardi va o'sha pul foydadan IKKI MARTA ayirilardi.
+
+                    Lekin pul kassadan chiqqan — buni ko'rsatmasak
+                    do'konchi "pulim qayerga ketdi?" deb qolardi. */}
+                {tovargaSarflandi > 0 && (
+                  <View style={s.tovarIzoh}>
+                    <Icon name="kirim" size={14} color={colors.primary} />
+                    <Text style={[font.tiny, { color: colors.primary, flex: 1 }]}>
+                      Bugun {money(tovargaSarflandi)} so'm tovarga sarflandi
+                      {' '}— foydadan ayirilmaydi, u sotilganda hisobga olinadi
+                    </Text>
+                  </View>
+                )}
+
                 {/* Ikki qator: eng ko'p bosiladigan "Yangi savdo" butun
                     kenglikni oladi, qolgan ikkitasi ostida yonma-yon.
                     Uchalasi bitta qatorga sig'dirilsa tor telefonda matn
@@ -201,14 +222,26 @@ export default function HomeScreen() {
                     onPress={() => router.push('/sale/new')}
                   />
                 </View>
+                {/* "Tovar olish" — do'konga mol kelganda. Chiqimning
+                    YONIDA turishi ataylab: ilgari mol shu qizil tugmaga
+                    yozilardi, chunki boshqa yo'l yo'q edi. Endi ikkalasi
+                    yonma-yon va rangi bilan farq qiladi — ko'k tovar
+                    (pul tovarga aylandi), qizil chiqim (pul ketdi). */}
                 <View style={s.actionsIkkinchi}>
                   <Button
-                    title="Mahsulot" icon="mahsulot" variant="soft" style={{ flex: 1 }}
-                    onPress={() => router.push('/product/new')}
+                    title="Tovar olish" icon="kirim" variant="soft" style={{ flex: 1 }}
+                    onPress={() => router.push('/purchase/new')}
                   />
                   <Button
                     title="Chiqim" icon="chiqim" variant="danger" style={{ flex: 1 }}
                     onPress={() => router.push('/expense/new')}
+                  />
+                </View>
+                <View style={s.actionsIkkinchi}>
+                  <Button
+                    title="Yangi mahsulot" icon="mahsulot" variant="soft"
+                    style={{ flex: 1 }}
+                    onPress={() => router.push('/product/new')}
                   />
                 </View>
 
@@ -350,6 +383,14 @@ const s = StyleSheet.create({
     marginTop: spacing.md,
     backgroundColor: colors.warningSoft,
     borderWidth: 1, borderColor: colors.warningLine,
+    borderRadius: radius.sm,
+    paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
+  },
+  tovarIzoh: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    marginTop: spacing.md,
+    backgroundColor: colors.primarySoft,
+    borderWidth: 1, borderColor: colors.primaryLine,
     borderRadius: radius.sm,
     paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
   },

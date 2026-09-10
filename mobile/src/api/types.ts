@@ -102,6 +102,15 @@ export interface Dashboard {
      * kirmaydi — mol chiqmagan, tannarx yo'q.
      */
     debt_given: number;
+    /**
+     * Tovarga sarflangan pul (omborga kirim). Foydadan AYIRILMAYDI —
+     * mol olish xarajat emas, pulning tovarga aylanishi; xarajatga u
+     * sotilganda, tan narx bo'lib aylanadi. Bu yerda faqat "kassadan
+     * shuncha chiqdi" degan ma'lumot.
+     *
+     * Ixtiyoriy: eski serverda bu maydon yo'q.
+     */
+    purchase_total?: number;
   };
   debts: { total_owed: number; debtor_count: number; overdue_count: number };
   low_stock: Array<{ id: string; name: string; stock: number; min_stock: number; unit: Unit }>;

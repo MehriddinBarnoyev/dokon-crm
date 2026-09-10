@@ -18,6 +18,8 @@ import { Icon } from '../../src/components/Icon';
 
 interface DailyRow {
   day: string; sales_total: number; cash_in: number;
+  /** Sotilgan molning tan narxi — foyda zanjiridagi yetishmayotgan bo'g'in. */
+  cost_total: number;
   expense_total: number; net_profit: number; sales_count: number;
   /** Shu kuni sotilgan, lekin puli olinmagan summa */
   credit_total: number;
@@ -115,11 +117,26 @@ export default function ReportsScreen() {
 
   const sum = (daily ?? []).reduce((acc, r) => ({
     sales: acc.sales + Number(r.sales_total),
+    tannarx: acc.tannarx + Number(r.cost_total ?? 0),
     expense: acc.expense + Number(r.expense_total),
     profit: acc.profit + Number(r.net_profit),
     count: acc.count + Number(r.sales_count),
     qarzFoyda: acc.qarzFoyda + Number(r.credit_profit ?? 0),
-  }), { sales: 0, expense: 0, profit: 0, count: 0, qarzFoyda: 0 });
+  }), { sales: 0, tannarx: 0, expense: 0, profit: 0, count: 0, qarzFoyda: 0 });
+
+  /**
+   * Yalpi foyda = savdo − sotilgan molning tan narxi.
+   *
+   * Ilgari hisobotda faqat Savdo, Chiqim va Sof foyda turardi va raqamlar
+   * bir-biriga BOG'LANMASDI: "Savdo 18 000, Chiqim 105 000, Foyda −101 580"
+   * ni ko'rgan do'konchi 18 000 − 105 000 = −87 000 deb hisoblardi.
+   * Yetishmayotgan bo'g'in — mol o'zi necha pulga olingani.
+   *
+   * Eski server `cost_total` bermaydi; u holda zanjir ko'rsatilmaydi
+   * (`tannarxBor`), aks holda "Yalpi foyda = Savdo" degan yolg'on chiqardi.
+   */
+  const tannarxBor = (daily ?? []).some((r) => r.cost_total != null);
+  const yalpiFoyda = sum.sales - sum.tannarx;
 
   const foydali = sum.profit >= 0;
 
@@ -195,20 +212,50 @@ export default function ReportsScreen() {
                   </Text>
                 </View>
 
-                <View style={s.grid}>
-                  <Cell><Stat label="Savdo" value={money(sum.sales)} /></Cell>
-                  <Cell>
-                    {/* Chiqim yagona boshqariladigan raqam — bosilsa
-                        ro'yxati ochiladi. */}
+                {/* HISOB ZANJIRI. Har bir raqam qayerdan kelgani ko'rinib
+                    tursin — do'konchi yakuniy foydani ishonib qabul qilishi
+                    uchun uni o'zi qo'shib chiqa olishi kerak. */}
+                {tannarxBor ? (
+                  <View style={s.zanjir}>
+                    <Zanjir label="Savdo" value={money(sum.sales)} />
+                    <Zanjir label="Sotilgan mol tan narxi" value={`− ${money(sum.tannarx)}`} />
+                    <View style={s.zanjirChiziq} />
+                    <Zanjir
+                      label="Yalpi foyda" value={money(yalpiFoyda)} kalin
+                      tone={yalpiFoyda >= 0 ? colors.success : colors.danger}
+                    />
                     <PressScale
                       accessibilityRole="button"
                       accessibilityLabel={`Chiqim ${money(sum.expense)} so'm, ro'yxatni ochish`}
                       onPress={() => router.push('/expenses')}
-                      scale={0.96}
+                      scale={0.98}
                     >
-                      <Stat label="Chiqim ›" value={money(sum.expense)} tone={colors.danger} />
+                      <Zanjir label="Chiqim ›" value={`− ${money(sum.expense)}`}
+                        tone={colors.danger} />
                     </PressScale>
-                  </Cell>
+                    <View style={s.zanjirChiziq} />
+                    <Zanjir
+                      label="Sof foyda" value={money(sum.profit)} kalin
+                      tone={foydali ? colors.success : colors.danger}
+                    />
+                  </View>
+                ) : (
+                  <View style={s.grid}>
+                    <Cell><Stat label="Savdo" value={money(sum.sales)} /></Cell>
+                    <Cell>
+                      <PressScale
+                        accessibilityRole="button"
+                        accessibilityLabel={`Chiqim ${money(sum.expense)} so'm, ro'yxatni ochish`}
+                        onPress={() => router.push('/expenses')}
+                        scale={0.96}
+                      >
+                        <Stat label="Chiqim ›" value={money(sum.expense)} tone={colors.danger} />
+                      </PressScale>
+                    </Cell>
+                  </View>
+                )}
+
+                <View style={s.grid}>
                   <Cell><Stat label="Savdolar soni" value={String(sum.count)} /></Cell>
                   <Cell>
                     <Stat
@@ -411,9 +458,18 @@ export default function ReportsScreen() {
             <SectionTitle>Kunlar bo'yicha</SectionTitle>
             <Card style={{ paddingVertical: spacing.sm }}>
               <View style={s.dayHead}>
-                <Text style={[font.tiny, { color: colors.textFaint, width: 74 }]}>Kun</Text>
+                <Text style={[font.tiny, { color: colors.textFaint, width: 64 }]}>Kun</Text>
                 <Text style={[font.tiny, { color: colors.textFaint, flex: 1 }]}>Savdo</Text>
-                <Text style={[font.tiny, { color: colors.textFaint, width: 76, textAlign: 'right' }]}>
+                {/* Tan narx ustuni busiz "Savdo − Chiqim = Foyda" chiqmasdi
+                    va do'konchi raqamlar xato deb o'ylardi. */}
+                {tannarxBor && (
+                  <Text style={[font.tiny, {
+                    color: colors.textFaint, width: 74, textAlign: 'right',
+                  }]}>
+                    Tan narx
+                  </Text>
+                )}
+                <Text style={[font.tiny, { color: colors.textFaint, width: 72, textAlign: 'right' }]}>
                   Chiqim
                 </Text>
                 <Text style={[font.tiny, { color: colors.textFaint, width: 82, textAlign: 'right' }]}>
@@ -434,14 +490,21 @@ export default function ReportsScreen() {
                     i > 0 ? { borderTopWidth: 1, borderTopColor: colors.borderSoft } : null,
                   ]}
                 >
-                  <Text style={[font.small, { color: colors.textMuted, width: 74 }]}>
+                  <Text style={[font.small, { color: colors.textMuted, width: 64 }]}>
                     {sana(new Date(r.day))}
                   </Text>
                   <Text style={[font.num, { color: colors.text, flex: 1, fontSize: 13 }]}>
                     {money(r.sales_total)}
                   </Text>
+                  {tannarxBor && (
+                    <Text style={[font.num, {
+                      color: colors.textMuted, width: 74, textAlign: 'right', fontSize: 13,
+                    }]}>
+                      −{money(r.cost_total)}
+                    </Text>
+                  )}
                   <Text style={[font.num, {
-                    color: colors.danger, width: 76, textAlign: 'right', fontSize: 13,
+                    color: colors.danger, width: 72, textAlign: 'right', fontSize: 13,
                   }]}>
                     −{money(r.expense_total)}
                   </Text>
@@ -469,6 +532,28 @@ function Cell({ children }: { children: React.ReactNode }) {
   return <View style={s.cell}>{children}</View>;
 }
 
+/** Hisob zanjirining bitta qatori: chapda nomi, o'ngda raqami. */
+function Zanjir({ label, value, tone, kalin }: {
+  label: string; value: string; tone?: string; kalin?: boolean;
+}) {
+  return (
+    <View style={s.zanjirQator}>
+      <Text style={[
+        kalin ? font.bodyBold : font.small,
+        { color: kalin ? colors.text : colors.textMuted, flex: 1 },
+      ]}>
+        {label}
+      </Text>
+      <Text style={[font.num, {
+        color: tone ?? colors.text,
+        fontSize: kalin ? 17 : 15,
+      }]}>
+        {value}
+      </Text>
+    </View>
+  );
+}
+
 const s = StyleSheet.create({
   scroll: {
     paddingHorizontal: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxxl,
@@ -489,6 +574,15 @@ const s = StyleSheet.create({
     borderTopWidth: 1, borderTopColor: colors.borderSoft,
   },
   cell: { width: '47%' },
+  zanjir: {
+    marginTop: spacing.md, paddingTop: spacing.md,
+    borderTopWidth: 1, borderTopColor: colors.borderSoft,
+    gap: spacing.xs,
+  },
+  zanjirQator: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  zanjirChiziq: {
+    height: 1, backgroundColor: colors.borderSoft, marginVertical: spacing.xs,
+  },
   saralashQator: {
     flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.sm,
   },

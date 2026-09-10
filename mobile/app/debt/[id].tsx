@@ -358,9 +358,11 @@ export default function DebtDetail() {
                           <Text style={[font.num, { color: colors.text, flex: 1 }]}>
                             {money(p.total)} so'm
                           </Text>
+                          {/* Rang usulga emas, PUL tushganiga qarab —
+                              aralash to'lovda yarmi qarzda qolishi mumkin. */}
                           <Badge
                             text={p.payment_method}
-                            tone={p.payment_method === 'qarz' ? 'warning' : 'success'}
+                            tone={Number(p.paid) < Number(p.total) ? 'warning' : 'success'}
                           />
                         </View>
 

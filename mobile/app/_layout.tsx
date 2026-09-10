@@ -67,6 +67,7 @@ function AuthGate() {
           savdo oqimining davomi ekanini bildiradi. */}
       <Stack.Screen name="chek"         options={{ presentation: 'modal' }} />
       <Stack.Screen name="product/new"  options={{ presentation: 'modal' }} />
+      <Stack.Screen name="purchase/new" options={{ presentation: 'modal' }} />
       <Stack.Screen name="settings"     options={{ presentation: 'modal' }} />
       <Stack.Screen name="expense/new"  options={{ presentation: 'modal' }} />
       <Stack.Screen name="debt/new"     options={{ presentation: 'modal' }} />

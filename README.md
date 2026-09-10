@@ -398,7 +398,67 @@ Filtrlash **serverda** bajariladi (`GET /products?status=&unit=&category=&sort=`
 telefonda qayta filtrlanmaydi — ikki joyda ikki xil qoida bo'lmasligi uchun.
 Mavjud variantlar: `GET /products/meta/filters`.
 
+## Kun chegarasi — bir marta chiqqan, uzoq yashagan xato
+
+Kunlik ekranda yuqorida "Savdolar soni 3" turardi, pastdagi ro'yxatda esa
+"Bu kuni savdo bo'lmagan". Raqamlar bor, savdolar yo'q.
+
+Sabab: kun chegarasi vaqt mintaqasiga IKKI MARTA o'girilardi.
+
+```sql
+-- XATO: `date` avval timestamptz ga (SESSIYA mintaqasida) o'giriladi,
+-- natija `timestamp` bo'lib chiqadi va created_at bilan solishtirilganda
+-- yana sessiya mintaqasida o'qiladi.
+$1::date AT TIME ZONE 'Asia/Tashkent'          -- 2026-09-09 05:00 (timestamp)
+
+-- TO'G'RI:
+($1::date)::timestamp AT TIME ZONE 'Asia/Tashkent'  -- 2026-09-08 19:00+00
+```
+
+Sessiya UTC bo'lganda kun 00:00 emas, **10:00** da boshlanardi va ertalabki
+barcha savdolar, chiqimlar va qarzlar kunlik ekrandan tushib qolardi.
+
+**Nega uzoq yashadi:** mahalliy docker'da sessiya mintaqasi allaqachon
+Asia/Tashkent edi (`docker-compose.yml` → `TZ`), shuning uchun mahalliyda
+hammasi to'g'ri ishlardi. Xato faqat ishlab turgan serverda ko'rinardi.
+
+Ikkala muhitni bir xil qilish uchun `db.ts` endi har ulanishda
+`SET TIME ZONE 'UTC'` qiladi — mahalliy sinov ishlab turgan serverni aynan
+takrorlaydi. `date` ustunlari ham endi MATN bo'lib qoladi ("2026-09-10"),
+JS Date emas: aks holda ular jarayon mintaqasidagi yarim tunga tushib,
+JSON'ga o'girilganda bir kun orqaga surilardi.
+
+Tenglik sinovga qulflandi: `test-api.py` har kun uchun
+`yig'indidagi savdolar soni == ro'yxat uzunligi` ekanini tekshiradi.
+
 ## Foyda tahlili
+
+**Hisob zanjiri.** Hisobotda ilgari faqat Savdo, Chiqim va Sof foyda turardi
+va ular bir-biriga BOG'LANMASDI: *"Savdo 18 000, Chiqim 105 000, Foyda
+-101 580"* ni ko'rgan do'konchi 18 000 - 105 000 = -87 000 deb hisoblardi va
+farq qayerdan kelganini tushunmasdi.
+
+Yetishmayotgan bo'g'in - **sotilgan molning tan narxi**. Endi u
+`daily_summary` da alohida ustun (`cost_total`) va ekranda ochiq ko'rsatiladi:
+
+```
+Savdo                    1 194 499
+Sotilgan mol tan narxi  -  724 219
+----------------------------------
+Yalpi foyda                470 280
+Chiqim                  -  811 000
+----------------------------------
+Sof foyda                 -340 720
+```
+
+Do'konchi yakuniy raqamni o'zi qo'shib chiqa olishi kerak - aks holda butun
+hisobotga ishonch yo'qoladi. Tenglik sinovda ham qulflangan: `test-api.py`
+har bir kun uchun `Savdo - Tan narx - Chiqim = Sof foyda` ekanini tekshiradi.
+
+> **Ombor holati** (tovar qiymati) bu zanjirga KIRMAYDI - u tokchada turgan
+> molning qiymati, davr ichida sotilganining emas. Shuning uchun alohida
+> kartada.
+
 
 Foyda ilgari faqat KUN bo'yicha ko'rinardi. Bitta zararli savdo kunlik
 yig'indida yo'qolib ketardi, "qaysi mahsulot pul olib keladi" degan savolga

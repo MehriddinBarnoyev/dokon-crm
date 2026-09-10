@@ -256,62 +256,9 @@ FROM customers c
 LEFT JOIN debts d ON d.customer_id = c.id
 GROUP BY c.id, c.shop_id, c.name, c.phone;
 
--- Kunlik kirim / chiqim / foyda
+-- Kunlik kirim / chiqim / foyda — `daily_summary`
 --
--- FOYDA QACHON YOZILADI? Savdo BO'LGAN kuni — mijoz pulni keyin bersa ham.
--- Bu jahon amaliyotidagi asosiy qoida (accrual): daromad mol qo'ldan
--- chiqqanda tan olinadi, pul kelganda emas. Aks holda "qarzga sotgan kun"
--- foydasiz ko'rinardi va o'sha foyda mijoz to'lagan kunga sakrab, qaysi
--- mahsulot qancha foyda keltirgani umuman bilinmay qolardi.
---
--- Lekin do'konchiga bitta raqamning o'zi kam: "foyda bor, pul yo'q" holati
--- eng ko'p uchraydigan tuzoq. Shuning uchun yonida `credit_total` va
--- `credit_profit` ham chiqadi — o'sha foydaning qancha qismi hali qog'ozda,
--- ya'ni odamlarning cho'ntagida turgani.
-CREATE OR REPLACE VIEW daily_summary AS
-WITH s AS (
-  SELECT shop_id, (created_at AT TIME ZONE 'Asia/Tashkent')::date AS d,
-         SUM(total) AS sales_total, SUM(paid) AS cash_in,
-         SUM(total - cost_total) AS gross_profit, COUNT(*) AS sales_count,
-         -- O'sha kuni sotilgan, lekin puli olinmagan qism
-         SUM(GREATEST(total - paid, 0)) AS credit_total,
-         -- Qarzda qolgan ULUSHga to'g'ri keladigan foyda.
-         -- Yarmi to'langan savdoning foydasi ham yarmi qarzda hisoblanadi.
-         ROUND(SUM((total - cost_total)
-                   * CASE WHEN total > 0 THEN GREATEST(total - paid, 0) / total
-                          ELSE 0 END), 2) AS credit_profit
-  FROM sales GROUP BY 1, 2
-), e AS (
-  SELECT shop_id, (created_at AT TIME ZONE 'Asia/Tashkent')::date AS d,
-         SUM(amount) AS expense_total
-  FROM expenses WHERE deleted_at IS NULL GROUP BY 1, 2
-), p AS (
-  SELECT shop_id, (created_at AT TIME ZONE 'Asia/Tashkent')::date AS d,
-         SUM(-amount) AS debt_paid          -- to'langan qarz = kirim
-  FROM debts WHERE amount < 0 GROUP BY 1, 2
-), q AS (
-  -- Qo'lda yozilgan qarz: savdoga bog'lanmagani (`sale_id IS NULL`).
-  -- Savdodan chiqqan qarz `credit_total` da allaqachon bor, ikki marta
-  -- sanalmasin.
-  SELECT shop_id, (created_at AT TIME ZONE 'Asia/Tashkent')::date AS d,
-         SUM(amount) AS debt_given
-  FROM debts WHERE amount > 0 AND sale_id IS NULL GROUP BY 1, 2
-)
-SELECT COALESCE(s.shop_id, e.shop_id, p.shop_id, q.shop_id) AS shop_id,
-       COALESCE(s.d, e.d, p.d, q.d)                         AS day,
-       COALESCE(s.sales_total, 0)                AS sales_total,
-       COALESCE(s.cash_in, 0) + COALESCE(p.debt_paid, 0) AS cash_in,
-       COALESCE(e.expense_total, 0)              AS expense_total,
-       COALESCE(s.gross_profit, 0) - COALESCE(e.expense_total, 0) AS net_profit,
-       COALESCE(s.sales_count, 0)                AS sales_count,
-       COALESCE(s.credit_total, 0)               AS credit_total,
-       COALESCE(s.credit_profit, 0)              AS credit_profit,
-       -- Qo'lda berilgan qarz. Tushum va foydaga ta'sir qilmaydi (mol
-       -- chiqmagan, tannarx yo'q) — lekin do'konchi kuni bilan qancha
-       -- qarz tarqatganini ko'rishi kerak.
-       COALESCE(q.debt_given, 0)                 AS debt_given
-FROM s FULL JOIN e ON s.shop_id = e.shop_id AND s.d = e.d
-       FULL JOIN p ON COALESCE(s.shop_id, e.shop_id) = p.shop_id
-                  AND COALESCE(s.d, e.d) = p.d
-       FULL JOIN q ON COALESCE(s.shop_id, e.shop_id, p.shop_id) = q.shop_id
-                  AND COALESCE(s.d, e.d, p.d) = q.d;
+-- Ta'rifi ATAYLAB shu yerda emas, `004-tezlik.sql` da: u yerda ko'rinish
+-- tezlik uchun qayta yozilgan. Ikki joyda ikki xil ta'rif tursa, ustun
+-- qo'shish imkonsiz bo'lardi — CREATE OR REPLACE ustunni olib tashlashga
+-- ruxsat bermaydi va migratsiya har safar yiqilardi.

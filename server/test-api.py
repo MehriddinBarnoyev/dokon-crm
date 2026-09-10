@@ -299,6 +299,71 @@ if len(qtarix) >= 2:
           f"{len(korilgan)} ta")
 
 # --- Aqlli qidiruv ---
+print("\n9f. Kun chegarasi: yig'indi va ro'yxat bir xil kunni ko'radi")
+# Kunlik ekranda yuqorida "Savdolar soni 35", pastdagi ro'yxatda esa 28 ta
+# chiqqan edi. Sabab: sana chegarasi vaqt mintaqasiga IKKI MARTA o'girilib,
+# kun 00:00 emas 10:00 da boshlanardi va ertalabki savdolar tushib qolardi.
+# Mahalliy bazada sezilmasdi (u yerda sessiya mintaqasi allaqachon Toshkent).
+oxirgi_kunlar, _ = call("/reports/daily?days=7")
+nomos = []
+for r in oxirgi_kunlar[:5]:
+    kun_iso = str(r["day"])[:10]   # server "YYYY-MM-DD" beradi
+    kun_hisobot, _ = call(f"/reports/day/{kun_iso}")
+    kutilgan = int(r["sales_count"])
+    haqiqiy = len(kun_hisobot["sales"])
+    if kutilgan != haqiqiy:
+        nomos.append(f"{kun_iso}: yig'indi {kutilgan}, ro'yxat {haqiqiy}")
+check("savdolar soni ro'yxat uzunligiga teng", not nomos,
+      "; ".join(nomos) if nomos else f"{min(5, len(oxirgi_kunlar))} kun tekshirildi")
+
+
+print("\n9e. Tushum qayerdan yig'iladi")
+# "Kunlik tushum" va "Savdo" har xil raqam — do'konchining eng ko'p
+# so'ragan savoli shu. Farq: qarzga sotilgani bugun pul keltirmaydi,
+# eski qarzning to'lovi esa bugungi savdoga kirmasa ham kassaga tushadi.
+kunlar2, _ = call("/reports/daily?days=90")
+check("tushum bo'laklari beriladi",
+      all("sales_cash" in r and "debt_paid" in r for r in kunlar2))
+check("savdodan naqd + qarz to'lovi = kunlik tushum",
+      all(abs((float(r["sales_cash"]) + float(r["debt_paid"]))
+              - float(r["cash_in"])) < 0.01 for r in kunlar2))
+check("savdo − qarzga sotilgani = savdodan naqd",
+      all(abs((float(r["sales_total"]) - float(r["credit_total"]))
+              - float(r["sales_cash"])) < 0.01 for r in kunlar2))
+
+
+print("\n9d. Foyda zanjiri: Savdo − Tan narx − Chiqim = Sof foyda")
+# Do'konchi hisobotdagi raqamlarni O'ZI qo'shib chiqa olishi kerak.
+# Tan narx ko'rsatilmasa "Savdo 18 000, Chiqim 105 000, Foyda −101 580"
+# xato ko'rinadi va butun hisobotga ishonch yo'qoladi.
+kunlar, _ = call("/reports/daily?days=90")
+check("kunlik hisobotda tan narx bor",
+      all("cost_total" in r for r in kunlar), f"{len(kunlar)} kun")
+
+buzuq = [r for r in kunlar
+         if abs((float(r["sales_total"]) - float(r["cost_total"])
+                 - float(r["expense_total"])) - float(r["net_profit"])) > 0.01]
+check("har kunda tenglik saqlanadi", not buzuq,
+      f"{len(kunlar) - len(buzuq)}/{len(kunlar)} kun")
+
+dash, _ = call("/reports/dashboard")
+t = dash["today"]
+check("bosh sahifada ham tan narx bor", "cost_total" in t)
+check("bugungi tenglik saqlanadi",
+      abs((float(t["sales_total"]) - float(t["cost_total"])
+           - float(t["expense_total"])) - float(t["net_profit"])) < 0.01,
+      f"{t['sales_total']} − {t['cost_total']} − {t['expense_total']}"
+      f" = {t['net_profit']}")
+
+bugun = time.strftime("%Y-%m-%d")
+kun, _ = call(f"/reports/day/{bugun}")
+ks = kun["summary"]
+check("kunlik ekranda ham tan narx bor", "cost_total" in ks)
+check("kun ekranidagi tenglik saqlanadi",
+      abs((float(ks["sales_total"]) - float(ks["cost_total"])
+           - float(ks["expense_total"])) - float(ks["net_profit"])) < 0.01)
+
+
 print("\n9c. Foyda tahlili")
 # Tushum bo'yicha birinchi turgan mahsulot eng ko'p FOYDA keltirgani emas.
 # Do'konchining asl savoli shu — shuning uchun ikki xil tartib kerak.

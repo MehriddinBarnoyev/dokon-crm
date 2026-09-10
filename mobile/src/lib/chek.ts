@@ -40,11 +40,30 @@ export interface Chek {
   qarz: number;
   usul: PaymentMethod;
   /**
+   * Aralash to'lovda to'langan qismning taqsimoti. Bazada bunday ustun
+   * yo'q (hisobot naqd bilan kartani ajratmaydi), lekin XARIDOR uchun bu
+   * muhim: "kartadan qancha o'tdi?" degan savol chek qo'lda turganda
+   * beriladi. Ikkalasi ham bo'sh bo'lsa chekda ko'rsatilmaydi.
+   */
+  naqd?: number;
+  karta?: number;
+  /**
    * Serverga yetib bordimi. `false` — savdo navbatda: chek haqiqiy,
    * lekin raqami qurilmaniki. Buni chekda ham aytamiz, aks holda
    * do'konchi ikki xil raqamni ko'rib chalkashardi.
    */
   yuborildi: boolean;
+}
+
+/** Aralash to'lovda naqd/karta qatorlari. Aks holda bo'sh satr. */
+function taqsimotQatorlari(c: Chek): Array<[string, number]> {
+  if (c.usul !== 'aralash') return [];
+  const r: Array<[string, number]> = [];
+  if (c.naqd && c.naqd > 0) r.push(['— naqd', c.naqd]);
+  if (c.karta && c.karta > 0) r.push(['— karta', c.karta]);
+  // Bitta qator qolsa taqsimot ko'rsatishning ma'nosi yo'q: u
+  // "To'landi" bilan bir xil raqamni takrorlagan bo'lardi.
+  return r.length > 1 ? r : [];
 }
 
 export const TOLOV_NOMI: Record<PaymentMethod, string> = {
@@ -147,6 +166,8 @@ export function chekHtml(c: Chek): string {
   ${qator('JAMI', `${money(c.jami)} so'm`, true)}
   ${qator("To'lov", TOLOV_NOMI[c.usul])}
   ${c.tolangan !== c.jami ? qator("To'landi", `${money(c.tolangan)} so'm`) : ''}
+  ${taqsimotQatorlari(c).map(([nom, summa]) =>
+      qator(nom, `${money(summa)} so'm`)).join('')}
   ${c.qarz > 0 ? qator('QARZ QOLDI', `${money(c.qarz)} so'm`, true) : ''}
   ${chiziq}
   <div class="oxir">Xaridingiz uchun rahmat!</div>
@@ -173,7 +194,11 @@ export function pdfOlchami(c: Chek): { width: number; height: number } {
   const asos = 148;                       // sarlavha, sana bloki, yakun
   const qatorBalandligi = 28;             // bir mahsulot: nomi + narx qatori
   const qoshimcha = (c.sotuvchi ? 13 : 0) + (c.mijoz ? 13 : 0)
-    + (c.qarz > 0 ? 30 : 0) + (c.yuborildi ? 0 : 15);
+    + (c.qarz > 0 ? 30 : 0) + (c.yuborildi ? 0 : 15)
+    // Aralash to'lovning naqd/karta qatorlari — har biri bitta satr.
+    + taqsimotQatorlari(c).length * 13
+    // "To'landi" qatori faqat to'liq to'lanmaganda chiqadi.
+    + (c.tolangan !== c.jami ? 13 : 0);
   return {
     width: 226,                           // 80 mm — kassa qog'ozi kengligi
     height: asos + qoshimcha + c.qatorlar.length * qatorBalandligi,

@@ -19,7 +19,6 @@ import {
 } from 'react-native';
 import { api } from '../api/client';
 import * as customerStore from '../data/customers';
-import { search as fuzzySearch } from '../lib/search';
 import { Button } from './ui';
 import { useToast } from './Toast';
 import { Icon } from './Icon';
@@ -91,12 +90,17 @@ export function CustomerPicker({ visible, value, onPick, onClose }: {
     }
   }
 
+  // Ism ham, telefon ham — qoida `data/customers.ts` da, Qarzlar ekrani
+  // bilan bitta joyda turadi.
   const { items: found, taxminiy } = useMemo(
-    () => fuzzySearch(all, q, (c) => c.name, { limit: 30 }),
+    () => customerStore.qidir(all, q, 30),
     [all, q]);
 
-  // Yozilgan ism ro'yxatda yo'q bo'lsa — yangi mijoz sifatida qo'shish taklifi
+  // Yozilgan ism ro'yxatda yo'q bo'lsa — yangi mijoz sifatida qo'shish taklifi.
+  // Faqat raqam yozilgan bo'lsa taklif chiqmaydi: bu telefon bo'yicha qidiruv,
+  // "901234567" ismli mijoz ochib qo'yish esa keyin tuzatib bo'lmaydigan xato.
   const yangiTaklif = q.trim().length >= 2
+    && /[^\d\s+()\-.]/.test(q)
     && !all.some((c) => c.name.toLowerCase() === q.trim().toLowerCase());
 
   return (
@@ -120,7 +124,7 @@ export function CustomerPicker({ visible, value, onPick, onClose }: {
 
           <TextInput
             style={s.input}
-            placeholder="Ism bo'yicha qidirish yoki yangi ism yozing"
+            placeholder="Ism yoki telefon — yoki yangi ism yozing"
             placeholderTextColor={colors.textFaint}
             value={q}
             onChangeText={setQ}

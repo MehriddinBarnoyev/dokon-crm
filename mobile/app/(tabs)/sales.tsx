@@ -222,12 +222,20 @@ export default function SalesScreen() {
                       {dateLabel(item.created_at)}
                       {item.customer_name ? ` · ${item.customer_name}` : ''}
                     </Text>
+                    {/* Aralash to'lovda naqd/karta taqsimoti shu izohda
+                        turadi — bazada alohida ustun yo'q. */}
+                    {item.note ? (
+                      <Text style={[font.tiny, { color: colors.textFaint }]}
+                        numberOfLines={1}>
+                        {item.note}
+                      </Text>
+                    ) : null}
                   </View>
 
                   <View style={{ alignItems: 'flex-end', gap: 5 }}>
                     <Badge
                       text={item.payment_method}
-                      tone={item.payment_method === 'qarz' ? 'warning' : 'success'}
+                      tone={Number(item.paid) < Number(item.total) ? 'warning' : 'success'}
                       dot
                     />
                     {item.source === 'ai' ? <Badge text="AI" tone="accent" /> : null}

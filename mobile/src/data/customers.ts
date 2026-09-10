@@ -20,6 +20,7 @@
  */
 import { api } from '../api/client';
 import * as cache from '../lib/cache';
+import { search, type SearchResult } from '../lib/search';
 
 export interface Customer {
   id: string;
@@ -110,4 +111,56 @@ export async function qosh(c: Customer): Promise<void> {
 /** Qarz/to'lov yozilgandan keyin — balanslar o'zgardi, keyingi sync darhol o'tsin. */
 export function invalidate() {
   oxirgiSync = 0;
+}
+
+/**
+ * MIJOZ QIDIRUVI — ism yoki telefon bo'yicha.
+ * =========================================
+ * Do'konchi mijozni ikki yo'l bilan qidiradi: ismini yozib yoki qo'lidagi
+ * daftar/telefon jurnalidan raqamini terib. Shuning uchun bitta maydon
+ * ikkalasini ham qabul qiladi — qaysi biri yozilganini o'zi ajratadi.
+ *
+ * Ism uchun `lib/search` qoidalari ishlatiladi (xato yozilgan ism ham
+ * topiladi), raqam uchun esa oddiy "ichida bormi" — telefonda taxmin qilish
+ * xavfli: bitta xato raqam boshqa mijozni ko'rsatib qo'yadi.
+ *
+ * Raqam solishtirishda `+998` yoki bo'sh joylar hisobga olinmaydi: bazadagi
+ * "+998901234567" bilan yozilgan "90 123", "901234567" va "998901" — hammasi
+ * mos tushadi.
+ */
+export interface Qidiriluvchi {
+  name: string;
+  phone: string | null;
+}
+
+/** "+998 90 123 45 67" → "998901234567" */
+function faqatRaqam(raw: string): string {
+  return String(raw ?? '').replace(/[^0-9]/g, '');
+}
+
+/**
+ * Ro'yxatni so'rov bo'yicha filtrlaydi. `taxminiy: true` — aniq moslik
+ * topilmadi, bular o'xshash variantlar (ekranda shuni aytib qo'yish kerak).
+ */
+export function qidir<T extends Qidiriluvchi>(
+  items: T[],
+  q: string,
+  limit = 60,
+): SearchResult<T> {
+  const matn = q.trim();
+  if (!matn) return { items: items.slice(0, limit), taxminiy: false };
+
+  // Faqat raqam va raqam belgilari yozilgan bo'lsa — bu telefon qidiruvi.
+  const raqam = faqatRaqam(matn);
+  const harfBor = /[^\d\s+()\-.]/.test(matn);
+  if (raqam.length >= 2 && !harfBor) {
+    const topildi = items
+      .filter((c) => c.phone && faqatRaqam(c.phone).includes(raqam))
+      .slice(0, limit);
+    // Hech narsa topilmasa ism qidiruviga o'tamiz: raqamli ism ham bo'ladi
+    // ("2-do'kon" kabi), do'konchi esa bo'sh ekran ko'rmasin.
+    if (topildi.length > 0) return { items: topildi, taxminiy: false };
+  }
+
+  return search(items, matn, (c) => c.name, { limit });
 }

@@ -35,11 +35,28 @@ interface DayReport {
   day: string;
   summary: {
     sales_total: number; cash_in: number; expense_total: number;
+    /** Sotilgan molning tan narxi — foyda zanjiridagi bo'g'in. */
+    cost_total: number;
+    /** Savdodan olingan naqd (qarzga ketmagani). */
+    sales_cash: number;
+    /** Eski qarzlarning bugungi to'lovi. */
+    debt_paid: number;
+    /** Qo'lda yozilgan qarz — mol chiqmagan. */
+    debt_given: number;
     net_profit: number; sales_count: number;
     /** Shu kuni sotilgan, lekin puli olinmagan summa */
     credit_total: number;
     /** `net_profit` ichidagi hali qo'lga tushmagan ulush */
     credit_profit: number;
+    /**
+     * Tovarga sarflangan pul (omborga kirim). Foydadan AYIRILMAYDI —
+     * mol olish xarajat emas, pulning tovarga aylanishi; xarajatga u
+     * sotilganda, tan narx bo'lib aylanadi. Bu yerda faqat "kassadan
+     * shuncha chiqdi" degan ma'lumot.
+     *
+     * Ixtiyoriy: eski serverda bu maydon yo'q.
+     */
+    purchase_total?: number;
   };
   sales: DaySale[];
   expenses: DayExpense[];
@@ -124,13 +141,82 @@ export default function DayScreen() {
             <Text style={[font.h3, { color: colors.textMuted, paddingBottom: 4 }]}>so'm</Text>
           </View>
 
-          <View style={st.grid}>
-            <Katak label="Savdo" value={money(s.sales_total)} />
-            <Katak label="Chiqim" value={money(s.expense_total)} tone={colors.danger} />
-            <Katak label="Sof foyda" value={money(foyda)}
-              tone={foyda >= 0 ? colors.success : colors.danger} />
-            <Katak label="Savdolar soni" value={String(s.sales_count)} />
-          </View>
+          {/*
+            TUSHUM ≠ SAVDO. Eng ko'p savol tug'diradigan joy shu edi:
+            yuqorida bitta raqam, pastda "Savdo" boshqa raqam turardi va
+            farq qayerdan kelgani aytilmasdi.
+
+              Savdo − qarzga sotilgani = savdodan olingan naqd
+              + eski qarzlarning to'lovi = kunlik tushum
+
+            Eski server bu bo'laklarni bermaydi — u holda ko'rsatmaymiz.
+          */}
+          {s.sales_cash != null && (
+            <View style={st.tushumIzoh}>
+              <Qator label="Savdodan naqd" value={money(s.sales_cash)} />
+              {Number(s.debt_paid) > 0 && (
+                <Qator label="Qarz to'lovlari" value={`+ ${money(s.debt_paid)}`}
+                  tone={colors.success} />
+              )}
+            </View>
+          )}
+
+          {/* HISOB ZANJIRI. Ilgari bu yerda Savdo, Chiqim va Sof foyda
+              alohida turardi va ular bir-biriga bog'lanmasdi: sotilgan mol
+              o'zi necha pulga olingani hech qayerda yo'q edi. */}
+          {s.cost_total != null ? (
+            <View style={st.zanjir}>
+              <Qator label="Savdo" value={money(s.sales_total)} />
+              <Qator label="Sotilgan mol tan narxi" value={`− ${money(s.cost_total)}`} />
+              <View style={st.zanjirChiziq} />
+              <Qator
+                label="Yalpi foyda" kalin
+                value={money(Number(s.sales_total) - Number(s.cost_total))}
+                tone={Number(s.sales_total) - Number(s.cost_total) >= 0
+                  ? colors.success : colors.danger}
+              />
+              <Qator label="Chiqim" value={`− ${money(s.expense_total)}`} tone={colors.danger} />
+              <View style={st.zanjirChiziq} />
+              <Qator label="Sof foyda" value={money(foyda)} kalin
+                tone={foyda >= 0 ? colors.success : colors.danger} />
+            </View>
+          ) : (
+            <View style={st.grid}>
+              <Katak label="Savdo" value={money(s.sales_total)} />
+              <Katak label="Chiqim" value={money(s.expense_total)} tone={colors.danger} />
+              <Katak label="Sof foyda" value={money(foyda)}
+                tone={foyda >= 0 ? colors.success : colors.danger} />
+              <Katak label="Savdolar soni" value={String(s.sales_count)} />
+            </View>
+          )}
+
+          {/*
+            QARZ BLOKI. Ilgari kun davomida qancha qarz berilgani faqat
+            pastdagi sariq izohda, faqat `credit_profit > 0` bo'lganda va
+            faqat savdodan chiqqan qismi ko'rinardi. Qo'lda yozilgan qarz
+            (`debt_given`) esa umuman ko'rsatilmasdi — server uni berib
+            tursa ham.
+          */}
+          {(Number(s.credit_total) > 0 || Number(s.debt_given) > 0
+            || Number(s.debt_paid) > 0) && (
+            <View style={st.zanjir}>
+              <Text style={[font.label, { color: colors.textMuted, marginBottom: 2 }]}>
+                QARZ HARAKATI
+              </Text>
+              {Number(s.credit_total) > 0 && (
+                <Qator label="Qarzga sotildi" value={money(s.credit_total)}
+                  tone={colors.warning} />
+              )}
+              {Number(s.debt_given) > 0 && (
+                <Qator label="Qo'lda qarz berildi" value={money(s.debt_given)}
+                  tone={colors.warning} />
+              )}
+              {Number(s.debt_paid) > 0 && (
+                <Qator label="Qarz to'landi" value={`− ${money(s.debt_paid)}`}
+                  tone={colors.success} />
+              )}
+            </View>
+          )}
 
           {/* Foyda savdo bo'lgan kuni yoziladi — puli keyin kelsa ham. Shuning
               uchun uning qancha qismi hali odamlarda turganini aytib qo'yamiz. */}
@@ -187,8 +273,10 @@ export default function DayScreen() {
                     ) : null}
                   </View>
                   <View style={{ alignItems: 'flex-end', gap: 3 }}>
+                    {/* Rang usulga emas, PUL tushganiga qarab: yarmi
+                        qarzda qolgan savdo yashil ko'rinmasin. */}
                     <Badge text={sale.payment_method}
-                      tone={sale.payment_method === 'qarz' ? 'warning' : 'success'} />
+                      tone={qarz > 0 ? 'warning' : 'success'} />
                     {sale.source === 'ai' ? <Badge text="AI" tone="accent" /> : null}
                   </View>
                 </Pressable>
@@ -265,6 +353,25 @@ export default function DayScreen() {
   );
 }
 
+/** Hisob zanjirining bitta qatori. */
+function Qator({ label, value, tone, kalin }: {
+  label: string; value: string; tone?: string; kalin?: boolean;
+}) {
+  return (
+    <View style={st.zanjirQator}>
+      <Text style={[
+        kalin ? font.bodyBold : font.small,
+        { color: kalin ? colors.text : colors.textMuted, flex: 1 },
+      ]}>
+        {label}
+      </Text>
+      <Text style={[font.num, { color: tone ?? colors.text, fontSize: kalin ? 17 : 15 }]}>
+        {value}
+      </Text>
+    </View>
+  );
+}
+
 function Katak({ label, value, tone }: { label: string; value: string; tone?: string }) {
   return (
     <View style={{ width: '47%', gap: 3 }}>
@@ -275,6 +382,16 @@ function Katak({ label, value, tone }: { label: string; value: string; tone?: st
 }
 
 const st = StyleSheet.create({
+  zanjir: {
+    marginTop: spacing.md, paddingTop: spacing.md,
+    borderTopWidth: 1, borderTopColor: colors.borderSoft,
+    gap: spacing.xs,
+  },
+  zanjirQator: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  tushumIzoh: { marginTop: spacing.sm, gap: 2 },
+  zanjirChiziq: {
+    height: 1, backgroundColor: colors.borderSoft, marginVertical: spacing.xs,
+  },
   scroll: {
     paddingHorizontal: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxxl,
   },

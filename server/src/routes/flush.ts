@@ -49,6 +49,32 @@ const QoshimchaSchema = z.discriminatedUnion('kind', [
     kind: z.literal('expense_delete'),
     id: z.string().uuid(),
   }),
+  /**
+   * CHIQIMNI OMBORGA KIRIMGA AYLANTIRISH.
+   *
+   * Do'konga olingan mol uzoq vaqt chiqim deb yozilgan edi — ilovada
+   * boshqa yo'l yo'q edi. Bunday yozuv foydani ikki marta kamaytiradi
+   * (chiqim bo'lib, keyin tan narx bo'lib) va ombor qoldig'ini
+   * oshirmaydi. Bu amal o'sha xatoni orqaga qarab tuzatadi.
+   *
+   * IKKALASI BITTA TRANZAKSIYADA. Yarim bajarilishi eng yomon natija:
+   * chiqim o'chib, kirim yozilmasa — pul umuman yo'qoladi; teskarisi
+   * bo'lsa — ikki marta sanaladi.
+   */
+  z.object({
+    kind: z.literal('expense_to_purchase'),
+    expense_id: z.string().uuid(),
+    supplier: z.string().nullable().default(null),
+    items: z.array(z.object({
+      product_id: z.string().uuid().nullable().default(null),
+      name: z.string().min(1),
+      unit: z.string().optional(),
+      qty: z.number().positive(),
+      cost_price: z.number().nonnegative(),
+      sale_price: z.number().nonnegative().nullable().default(null),
+    })).min(1),
+    note: z.string().nullable().default(null),
+  }),
   z.object({
     kind: z.literal('product_update'),
     id: z.string().uuid(),
@@ -214,6 +240,27 @@ async function bajar(
         RETURNING id`, [a.id, ctx.shopId], c);
     if (!row) throw new Error('Chiqim topilmadi');
     return { ok: true, id: a.id };
+  }
+
+  if (a.kind === 'expense_to_purchase') {
+    // Avval chiqimni o'chiramiz: topilmasa umuman kirim yozmaymiz.
+    // (Ikkinchi marta kelgan so'rov `mutation_log` da to'xtaydi, lekin
+    //  do'konchi chiqimni qo'lda o'chirib qo'ygan bo'lishi ham mumkin.)
+    const row = await one(
+      `UPDATE expenses SET deleted_at = now(), updated_at = now()
+        WHERE id = $1 AND shop_id = $2 AND deleted_at IS NULL
+        RETURNING id`, [a.expense_id, ctx.shopId], c);
+    if (!row) throw new Error('Chiqim topilmadi — o\'chirilgan bo\'lishi mumkin');
+
+    // Kirim ODDIY yo'ldan o'tadi: ayni `purchase` amali, ya'ni qoldiq
+    // ham, tan narx ham, `stock_moves` ham odatdagidek yoziladi.
+    const asAction = ActionSchema.safeParse({
+      type: 'purchase', supplier: a.supplier, items: a.items, note: a.note,
+    });
+    if (!asAction.success) throw new Error(xatoMatni('purchase', asAction.error));
+
+    const [res] = await executeActions(c, ctx, [asAction.data]);
+    return res as ActionResult;
   }
 
   // product_update

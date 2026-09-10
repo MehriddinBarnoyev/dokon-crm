@@ -227,6 +227,30 @@ export default function EditExpenseScreen() {
 
         <Button title="Saqlash" size="lg" onPress={save} loading={saving} />
 
+        {/* CHIQIM EMAS, TOVAR XARIDI BO'LSA.
+
+            Do'konga olingan mol uzoq vaqt shu yerga yozilgan — ilovada
+            boshqa yo'l yo'q edi. Bunday yozuv foydani IKKI MARTA
+            kamaytiradi (avval chiqim bo'lib, keyin sotilganda tan narx
+            bo'lib) va ombor qoldig'ini oshirmaydi.
+
+            `replace` — orqaga bosganda o'chirilgan chiqimning eski
+            nusxasi ochilib qolmasin. */}
+        {user?.role === 'owner' && (
+          <Button
+            title="Bu tovar xaridi edi" icon="kirim" variant="soft" size="lg"
+            disabled={saving}
+            onPress={() => router.replace({
+              pathname: '/purchase/new',
+              params: {
+                expense_id: e.id,
+                expense_amount: String(Number(e.amount)),
+                expense_note: e.note ?? '',
+              },
+            })}
+          />
+        )}
+
         {/* O'chirish serverda faqat egaga ruxsat etilgan — sotuvchiga
             ishlamaydigan tugma ko'rsatishning ma'nosi yo'q. */}
         {user?.role === 'owner' && (

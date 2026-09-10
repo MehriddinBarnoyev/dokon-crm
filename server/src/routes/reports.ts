@@ -15,18 +15,27 @@ export default async function reportRoutes(app: FastifyInstance) {
 
     const today = await one(
       `SELECT COALESCE(sales_total,0) AS sales_total,
+              COALESCE(cost_total,0)  AS cost_total,
               COALESCE(cash_in,0)     AS cash_in,
+              COALESCE(sales_cash,0)  AS sales_cash,
+              COALESCE(debt_paid,0)   AS debt_paid,
               COALESCE(expense_total,0) AS expense_total,
               COALESCE(net_profit,0)  AS net_profit,
               COALESCE(sales_count,0) AS sales_count,
               COALESCE(credit_total,0)  AS credit_total,
               COALESCE(credit_profit,0) AS credit_profit,
-              COALESCE(debt_given,0)  AS debt_given
+              COALESCE(debt_given,0)  AS debt_given,
+              -- Tovarga sarflangan pul. Foydaga TEGMAYDI — u sotilgan
+              -- kuni tan narx bo'lib ayiriladi. Bu yerda kassadan
+              -- chiqqan pul ko'rinib tursin degani.
+              COALESCE(purchase_total,0) AS purchase_total
          FROM daily_summary
         WHERE shop_id = $1
           AND day = (now() AT TIME ZONE 'Asia/Tashkent')::date`, [shop])
-      ?? { sales_total: 0, cash_in: 0, expense_total: 0, net_profit: 0,
-           sales_count: 0, credit_total: 0, credit_profit: 0, debt_given: 0 };
+      ?? { sales_total: 0, cost_total: 0, cash_in: 0, sales_cash: 0, debt_paid: 0,
+           expense_total: 0, net_profit: 0,
+           sales_count: 0, credit_total: 0, credit_profit: 0, debt_given: 0,
+           purchase_total: 0 };
 
     const [debts, lowStock, week] = await Promise.all([
       one(`SELECT COALESCE(SUM(balance),0) AS total_owed,
@@ -36,7 +45,7 @@ export default async function reportRoutes(app: FastifyInstance) {
       query(`SELECT id, name, stock, min_stock, unit FROM products
               WHERE shop_id = $1 AND is_active AND stock <= min_stock
               ORDER BY (stock - min_stock) LIMIT 10`, [shop]),
-      query(`SELECT day, sales_total, expense_total, net_profit, credit_profit
+      query(`SELECT day, sales_total, cost_total, expense_total, net_profit, credit_profit
                FROM daily_summary
               WHERE shop_id = $1
                 AND day > (now() AT TIME ZONE 'Asia/Tashkent')::date - 7
@@ -79,21 +88,44 @@ export default async function reportRoutes(app: FastifyInstance) {
     }).parse(req.params);
 
     const shop = req.auth.shop_id;
-    // Kun chegarasi do'kon vaqt mintaqasida hisoblanadi, UTC da emas —
-    // aks holda kechqurungi savdo ertangi kunga tushib qolardi.
-    const bounds = `($1::date AT TIME ZONE 'Asia/Tashkent')`;
-    const range = `s.created_at >= ${bounds}
-                   AND s.created_at < ((($1::date + 1))::timestamp AT TIME ZONE 'Asia/Tashkent')`;
+
+    /*
+     * KUN CHEGARASI — do'kon vaqt mintaqasida, UTC da emas: aks holda
+     * kechqurungi savdo ertangi kunga tushib qolardi.
+     *
+     * `::timestamp` SHART. Busiz `date AT TIME ZONE 'Asia/Tashkent'`
+     * butunlay boshqa yo'ldan ketadi: Postgres `date` ni avval
+     * `timestamptz` ga o'giradi (SESSIYA mintaqasida), natija esa
+     * `timestamp` bo'lib chiqadi va `created_at` bilan solishtirilganda
+     * yana sessiya mintaqasida o'qiladi — mintaqa IKKI MARTA qo'llanadi.
+     *
+     * Oqibati ishlab turgan serverda ko'rindi: kun 00:00 emas, 10:00 da
+     * boshlanardi va ertalabki savdolar kunlik ro'yxatdan tushib qolardi
+     * (yuqorida "35 ta savdo", pastdagi ro'yxatda 28 ta). Mahalliy
+     * docker'da sezilmasdi — u yerda sessiya mintaqasi allaqachon
+     * Asia/Tashkent edi. Endi `db.ts` mintaqani UTC ga qotiradi, ya'ni
+     * ikkala muhit bir xil ishlaydi.
+     */
+    const kunBoshi = (kun: string) =>
+      `((${kun})::timestamp AT TIME ZONE 'Asia/Tashkent')`;
+    const bounds = kunBoshi('$1::date');
+    const keyingiKun = kunBoshi('$1::date + 1');
+
+    const range = `s.created_at >= ${bounds} AND s.created_at < ${keyingiKun}`;
 
     const [summary, sales, expenses, debts] = await Promise.all([
       one(`SELECT COALESCE(sales_total,0)   AS sales_total,
+                  COALESCE(cost_total,0)    AS cost_total,
                   COALESCE(cash_in,0)       AS cash_in,
+                  COALESCE(sales_cash,0)    AS sales_cash,
+                  COALESCE(debt_paid,0)     AS debt_paid,
                   COALESCE(expense_total,0) AS expense_total,
                   COALESCE(net_profit,0)    AS net_profit,
                   COALESCE(sales_count,0)   AS sales_count,
                   COALESCE(credit_total,0)  AS credit_total,
                   COALESCE(credit_profit,0) AS credit_profit,
-                  COALESCE(debt_given,0)    AS debt_given
+                  COALESCE(debt_given,0)    AS debt_given,
+                  COALESCE(purchase_total,0) AS purchase_total
              FROM daily_summary WHERE shop_id = $2 AND day = $1::date`, [date, shop]),
 
       query(`SELECT s.id, s.total, s.paid, s.cost_total, s.payment_method,
@@ -114,22 +146,23 @@ export default async function reportRoutes(app: FastifyInstance) {
               WHERE shop_id = $2
                 AND deleted_at IS NULL
                 AND created_at >= ${bounds}
-                AND created_at < ((($1::date + 1))::timestamp AT TIME ZONE 'Asia/Tashkent')
+                AND created_at < ${keyingiKun}
               ORDER BY created_at DESC`, [date, shop]),
 
       query(`SELECT d.id, d.amount, d.note, d.created_at, c.name AS customer_name
                FROM debts d JOIN customers c ON c.id = d.customer_id
               WHERE d.shop_id = $2
                 AND d.created_at >= ${bounds}
-                AND d.created_at < ((($1::date + 1))::timestamp AT TIME ZONE 'Asia/Tashkent')
+                AND d.created_at < ${keyingiKun}
               ORDER BY d.created_at DESC`, [date, shop]),
     ]);
 
     return {
       day: date,
       summary: summary ?? {
-        sales_total: 0, cash_in: 0, expense_total: 0, net_profit: 0,
-        sales_count: 0, credit_total: 0, credit_profit: 0,
+        sales_total: 0, cost_total: 0, cash_in: 0, sales_cash: 0, debt_paid: 0,
+        expense_total: 0, net_profit: 0,
+        sales_count: 0, credit_total: 0, credit_profit: 0, purchase_total: 0,
       },
       sales, expenses, debts,
     };

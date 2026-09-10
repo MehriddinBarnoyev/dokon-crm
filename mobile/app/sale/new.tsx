@@ -43,6 +43,39 @@ interface CartLine {
   jami?: number;
 }
 
+/**
+ * Pul maydoni: fokusda xom raqam, aks holda "50 000" ko'rinishida.
+ * Savatdagi JAMI maydoni bilan bir xil qoida — yozayotganda qayta
+ * formatlansa kursor sakrab ketardi.
+ */
+function PulInput({ label, value, onChange, aksessLabel }: {
+  label: string;
+  value: number;
+  onChange(v: number): void;
+  aksessLabel: string;
+}) {
+  const [matn, setMatn] = useState<string | null>(null);
+  return (
+    <View style={s.pulQator}>
+      <Text style={[font.body, { color: colors.textMuted, flex: 1 }]}>{label}</Text>
+      <TextInput
+        value={matn ?? money(value)}
+        onChangeText={(v) => {
+          const toza = v.replace(/[^0-9]/g, '');
+          setMatn(toza);
+          onChange(Number(toza) || 0);
+        }}
+        onFocus={() => setMatn(value > 0 ? String(Math.round(value)) : '')}
+        onBlur={() => setMatn(null)}
+        keyboardType="number-pad"
+        selectTextOnFocus
+        accessibilityLabel={aksessLabel}
+        style={s.pulInput}
+      />
+    </View>
+  );
+}
+
 /** Qator summasi: do'konchi yozgani bo'lsa — o'sha, aks holda ko'paytma. */
 function qatorJami(l: CartLine): number {
   return l.jami ?? (Number(l.qty) || 0) * (Number(l.price) || 0);
@@ -179,6 +212,21 @@ export default function NewSaleScreen() {
   const [search, setSearch] = useState('');
   const [cart, setCart] = useState<CartLine[]>([]);
   const [payment, setPayment] = useState<PaymentMethod>('naqd');
+  /**
+   * ARALASH TO'LOV — hozir tushgan pulning taqsimoti.
+   *
+   * Do'konda savdo ko'pincha bitta usulga sig'maydi: "50 mingini naqd
+   * beraman, qolganini kartadan" yoki "yarmini hozir to'layman, yarmi
+   * qarz". Ilgari bunday savdoni yozishning yo'li yo'q edi — do'konchi
+   * yo hammasini qarzga yozardi, yo bitta savdoni ikkiga bo'lardi
+   * (ombor to'g'ri chiqardi, lekin chek va mijoz tarixi buzilardi).
+   *
+   * Server buni allaqachon biladi: `sales.paid` — hozir tushgan pul,
+   * `total - paid` esa AVTOMATIK qarzga yoziladi. Bu yerda faqat shu
+   * raqamni yig'ib beramiz, yangi marshrut kerak emas.
+   */
+  const [naqd, setNaqd] = useState(0);
+  const [karta, setKarta] = useState(0);
   // Mijoz endi HAR QANDAY to'lov turida tanlanishi mumkin — naqd sotganda ham.
   // Shunda keyin "bu mijoz nima olgan edi?" degan savolga javob bo'ladi.
   const [customer, setCustomer] = useState<PickedCustomer | null>(null);
@@ -212,6 +260,46 @@ export default function NewSaleScreen() {
   }, [products, search, cart]);
 
   const total = cart.reduce((s, l) => s + qatorJami(l), 0);
+
+  /* ---------------------- To'lov hisob-kitobi ---------------------- */
+
+  const aralash = payment === 'aralash';
+  /**
+   * Ortiqcha kiritilgani QAYTIM, ortiqcha to'lov emas: 80 mingga 100 ming
+   * berilsa, savdoga 80 ming yoziladi. Aks holda mijozda manfiy qarz
+   * (avans) paydo bo'lardi — buni ilova hech qayerda ko'rsatmaydi.
+   */
+  const kiritilgan = naqd + karta;
+  const tolangan = aralash ? Math.min(kiritilgan, total)
+    : payment === 'qarz' ? 0 : total;
+  const qarz = Math.max(total - tolangan, 0);
+  const ortiqcha = aralash ? Math.max(kiritilgan - total, 0) : 0;
+  /** Qarz qoladigan har qanday savdoda mijoz shart — serverda ham shunday. */
+  const mijozShart = qarz > 0;
+
+  /**
+   * Bazaga yoziladigan usul. Aralash tanlangani bilan amalda bitta usul
+   * ishlatilgan bo'lishi mumkin (masalan faqat naqd) — u holda savdo
+   * 'aralash' emas, o'sha usul bilan yoziladi: hisobot va chek toza qoladi.
+   */
+  const usul: PaymentMethod = !aralash ? payment
+    : tolangan <= 0 ? 'qarz'
+    : qarz <= 0 && karta <= 0 ? 'naqd'
+    : qarz <= 0 && naqd <= 0 ? 'karta'
+    : 'aralash';
+
+  /**
+   * NAQD/KARTA taqsimoti bazada alohida ustun EMAS — hisobotlar naqd
+   * bilan kartani ajratmaydi, ikkalasi ham "tushgan pul". Shuning uchun
+   * taqsimot savdo izohiga yoziladi: savdo sahifasida ham, chekda ham
+   * ko'rinadi va keyin "kartadan qancha o'tgan edi?" degan savolga
+   * javob bo'ladi.
+   */
+  const izoh = usul === 'aralash'
+    ? [naqd > 0 ? `naqd ${money(naqd)}` : null,
+       karta > 0 ? `karta ${money(karta)}` : null,
+       qarz > 0 ? `qarz ${money(qarz)}` : null].filter(Boolean).join(' + ')
+    : null;
 
   function add(p: Product) {
     // Yangi qator ENG TEPAGA qo'shiladi: kassir hozir qo'shgan mahsulotining
@@ -288,8 +376,12 @@ export default function NewSaleScreen() {
 
   async function submit() {
     if (cart.length === 0) return;
-    if (payment === 'qarz' && !customer) {
-      toast.ogoh('Qarzga sotish uchun mijozni tanlang');
+    // Qarz qoladigan har qanday savdo — to'liq qarz ham, aralashning
+    // to'lanmagan qismi ham — mijozsiz yozilmaydi.
+    if (mijozShart && !customer) {
+      toast.ogoh(qarz === total
+        ? 'Qarzga sotish uchun mijozni tanlang'
+        : `${money(qarz)} so'm qarz qoladi — mijozni tanlang`);
       setPickerOpen(true);
       return;
     }
@@ -307,14 +399,26 @@ export default function NewSaleScreen() {
         ...cart.map((l) =>
           `${l.qty} ${l.product.unit} ${l.product.name} × ${money(Number(l.price) || 0)}`
           + ` = ${money(qatorJami(l))} so'm`),
-        `To'lov: ${payment}${customer ? ` · ${customer.name}` : ''}`,
-        payment === 'qarz'
-          ? `${money(total)} so'm qarzga yoziladi`
+        `To'lov: ${usul}${customer ? ` · ${customer.name}` : ''}`,
+        // Aralashda raqamlar bo'lakma-bo'lak ko'rsatiladi: do'konchi
+        // saqlashdan oldin qaysi pul qayerga yozilishini ko'rsin.
+        ...(usul === 'aralash'
+          ? [naqd > 0 ? `Naqd: ${money(naqd)} so'm` : null,
+             karta > 0 ? `Karta: ${money(karta)} so'm` : null].filter(Boolean) as string[]
+          : []),
+        qarz > 0
+          ? `${money(qarz)} so'm qarzga yoziladi`
           : 'Ombordan mahsulot ayiriladi, kunlik kirimga qo\'shiladi',
       ],
-      warnings: yetmaydi.map((l) =>
-        `"${l.product.name}" omborda ${fq(l.product.stock)} ${l.product.unit} qolgan`
-        + ` — qoldiq minusga tushadi`),
+      warnings: [
+        ...yetmaydi.map((l) =>
+          `"${l.product.name}" omborda ${fq(l.product.stock)} ${l.product.unit} qolgan`
+          + ` — qoldiq minusga tushadi`),
+        ...(ortiqcha > 0
+          ? [`${money(ortiqcha)} so'm ortiqcha kiritildi — savdoga`
+             + ` ${money(total)} so'm yoziladi, qolgani qaytim`]
+          : []),
+      ],
       confirmText: 'Saqlash',
     });
     if (!ok) return;
@@ -337,8 +441,11 @@ export default function NewSaleScreen() {
         })),
         customer_id: customer?.id ?? null,
         customer_name: customer?.name ?? null,
-        payment_method: payment,
-        paid: payment === 'qarz' ? 0 : null,
+        payment_method: usul,
+        // Aralashda aniq summa yuboriladi; boshqa hollarda `null` —
+        // server o'zi hal qiladi (qarz => 0, qolgani => to'liq).
+        paid: aralash ? tolangan : payment === 'qarz' ? 0 : null,
+        note: izoh,
       }, `Savdo — ${money(total)} so'm`);
 
       if (res.error) throw new Error(res.error);
@@ -362,7 +469,6 @@ export default function NewSaleScreen() {
        * kerak. Raqam — server bergan savdo id'sidan, u yo'q bo'lsa
        * mutatsiya uuid'sidan.
        */
-      const tolangan = payment === 'qarz' ? 0 : total;
       chek.saqla({
         raqam: chek.chekRaqami(res.serverId ?? res.mutatsiyaId),
         dokon: shop?.name ?? "Do'kon",
@@ -378,8 +484,10 @@ export default function NewSaleScreen() {
         })),
         jami: total,
         tolangan,
-        qarz: Math.max(total - tolangan, 0),
-        usul: payment,
+        qarz,
+        usul,
+        naqd: usul === 'aralash' ? naqd : undefined,
+        karta: usul === 'aralash' ? karta : undefined,
         yuborildi: res.yuborildi,
       });
 
@@ -482,7 +590,7 @@ export default function NewSaleScreen() {
         {cart.length > 0 && (
           <View style={s.footer}>
             <View style={{ flexDirection: 'row', gap: spacing.sm }}>
-              {(['naqd', 'karta', 'qarz'] as PaymentMethod[]).map((m) => (
+              {(['naqd', 'karta', 'qarz', 'aralash'] as PaymentMethod[]).map((m) => (
                 <Pressable
                   key={m}
                   onPress={() => setPayment(m)}
@@ -495,7 +603,61 @@ export default function NewSaleScreen() {
               ))}
             </View>
 
-            {/* Mijoz — qarzda majburiy, boshqa hollarda ixtiyoriy */}
+            {/* Aralash — hozir tushgan pulni bo'lib yozish */}
+            {aralash && (
+              <View style={s.aralashPanel}>
+                <PulInput
+                  label="Naqd" value={naqd} onChange={setNaqd}
+                  aksessLabel="Naqd to'langan summa"
+                />
+                <PulInput
+                  label="Karta" value={karta} onChange={setKarta}
+                  aksessLabel="Karta orqali to'langan summa"
+                />
+
+                {/* Eng ko'p so'raladigan ikki holat bir bosishda */}
+                <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+                  <Pressable
+                    onPress={() => { setNaqd(Math.round(total / 2)); setKarta(0); }}
+                    style={s.tezTugma}
+                    accessibilityRole="button"
+                    accessibilityLabel="Yarmini naqd qilish"
+                  >
+                    <Text style={[font.small, { color: colors.primary }]}>Yarmi naqd</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => setNaqd(Math.max(total - karta, 0))}
+                    style={s.tezTugma}
+                    accessibilityRole="button"
+                    accessibilityLabel="Qolgan summani naqdga yozish"
+                  >
+                    <Text style={[font.small, { color: colors.primary }]}>Qolgani naqd</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => { setNaqd(0); setKarta(0); }}
+                    style={s.tezTugma}
+                    accessibilityRole="button"
+                    accessibilityLabel="Summalarni tozalash"
+                  >
+                    <Text style={[font.small, { color: colors.textMuted }]}>Tozalash</Text>
+                  </Pressable>
+                </View>
+
+                <View style={s.qoldiqQator}>
+                  <Text style={[font.small, { color: colors.textMuted }]}>
+                    {ortiqcha > 0 ? 'Qaytim' : 'Qarzga qoladi'}
+                  </Text>
+                  <Text style={[font.num, {
+                    color: ortiqcha > 0 ? colors.success
+                      : qarz > 0 ? colors.danger : colors.success,
+                  }]}>
+                    {money(ortiqcha > 0 ? ortiqcha : qarz)} so'm
+                  </Text>
+                </View>
+              </View>
+            )}
+
+            {/* Mijoz — qarz qolsa majburiy, boshqa hollarda ixtiyoriy */}
             <Pressable
               onPress={() => setPickerOpen(true)}
               style={({ pressed }) => [s.customerRow, pressed && { opacity: 0.7 }]}
@@ -513,9 +675,10 @@ export default function NewSaleScreen() {
                     yangi mijoz — savdo bilan qo'shiladi
                   </Text>
                 )}
-                {payment === 'qarz' && !customer && (
+                {mijozShart && !customer && (
                   <Text style={[font.tiny, { color: colors.danger }]}>
-                    Qarzga sotish uchun shart
+                    {qarz === total ? 'Qarzga sotish uchun shart'
+                      : `${money(qarz)} so'm qarz qoladi — mijoz shart`}
                   </Text>
                 )}
               </View>
@@ -665,5 +828,29 @@ const s = StyleSheet.create({
     backgroundColor: colors.surfaceAlt, alignItems: 'center',
   },
   payChipOn: { backgroundColor: colors.primary },
+  aralashPanel: {
+    gap: spacing.sm,
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: radius.md,
+    padding: spacing.md,
+  },
+  pulQator: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  pulInput: {
+    minWidth: 120, textAlign: 'right',
+    backgroundColor: colors.surface,
+    borderRadius: radius.sm,
+    borderWidth: 1, borderColor: colors.border,
+    paddingHorizontal: spacing.sm, paddingVertical: 8,
+    fontSize: 16, fontFamily: 'Inter_600SemiBold', color: colors.text,
+  },
+  tezTugma: {
+    flex: 1, alignItems: 'center', paddingVertical: 8,
+    backgroundColor: colors.surface, borderRadius: radius.sm,
+    borderWidth: 1, borderColor: colors.border,
+  },
+  qoldiqQator: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    borderTopWidth: 1, borderTopColor: colors.border, paddingTop: spacing.sm,
+  },
   totalRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
 });
