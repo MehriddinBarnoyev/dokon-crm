@@ -40,6 +40,7 @@ import { Icon } from '../../src/components/Icon';
 import { useToast } from '../../src/components/Toast';
 import { useConfirm } from '../../src/components/Confirm';
 import { ShtrixSkaner } from '../../src/components/ShtrixSkaner';
+import { YangiMahsulot } from '../../src/components/YangiMahsulot';
 import { haptic } from '../../src/lib/haptics';
 import {
   colors, elevation, font, money, qty as fq, radius, spacing,
@@ -75,6 +76,12 @@ export default function NewPurchaseScreen() {
   const [qatorlar, setQatorlar] = useState<Qator[]>([]);
   const [supplier, setSupplier] = useState('');
   const [skanerOchiq, setSkanerOchiq] = useState(false);
+  /**
+   * Katalogda yo'q mahsulotni SHU YERDA qo'shish.
+   * Mol kelganda yangi tovar bo'lishi — savdodagidan ham ko'p uchraydi:
+   * yetkazib beruvchi ko'pincha aynan yangi narsa olib keladi.
+   */
+  const [yangiOchiq, setYangiOchiq] = useState(false);
   const [busy, setBusy] = useState(false);
 
   // Katalog MAHALLIY cache'dan — savdo ekranidagi bilan bir xil yo'l.
@@ -287,11 +294,23 @@ export default function NewPurchaseScreen() {
                     </Text>
                   )}
                   {topilgan.length === 0 ? (
-                    <Text style={[font.small, {
-                      color: colors.textMuted, padding: spacing.md,
-                    }]}>
-                      Topilmadi — yangi mahsulot bo'lsa avval "Mahsulot" dan qo'shing
-                    </Text>
+                    <Pressable
+                      onPress={() => setYangiOchiq(true)}
+                      style={s.yangiTaklif}
+                      accessibilityRole="button"
+                      accessibilityLabel={`"${search.trim()}" ni yangi mahsulot`
+                        + ' sifatida qo\'shish'}
+                    >
+                      <Icon name="qoshish" size={20} color={colors.primary} />
+                      <View style={{ flex: 1 }}>
+                        <Text style={[font.body, { color: colors.primary }]} numberOfLines={1}>
+                          "{search.trim()}" ni qo'shish
+                        </Text>
+                        <Text style={[font.tiny, { color: colors.textMuted }]}>
+                          Shu yerda qo'shiladi — ro'yxat saqlanib qoladi
+                        </Text>
+                      </View>
+                    </Pressable>
                   ) : topilgan.map((p) => (
                     <Pressable key={p.id} onPress={() => qosh(p)} style={s.taklif}>
                       <View style={{ flex: 1 }}>
@@ -305,6 +324,22 @@ export default function NewPurchaseScreen() {
                       <Icon name="qoshish" size={20} color={colors.primary} />
                     </Pressable>
                   ))}
+
+                  {topilgan.length > 0 && search.trim().length >= 2 && (
+                    <Pressable
+                      onPress={() => setYangiOchiq(true)}
+                      style={[s.taklif, { borderBottomWidth: 0 }]}
+                      accessibilityRole="button"
+                      accessibilityLabel={`"${search.trim()}" ni yangi mahsulot`
+                        + ' sifatida qo\'shish'}
+                    >
+                      <Text style={[font.small, { color: colors.primary, flex: 1 }]}
+                        numberOfLines={1}>
+                        Ro'yxatda yo'qmi? "{search.trim()}" ni qo'shish
+                      </Text>
+                      <Icon name="qoshish" size={18} color={colors.primary} />
+                    </Pressable>
+                  )}
                 </View>
               )}
             </View>
@@ -363,6 +398,14 @@ export default function NewPurchaseScreen() {
           </View>
         )}
       </KeyboardAvoidingView>
+
+      {/* Yangi tovar shu yerda qo'shiladi va darhol ro'yxatga tushadi. */}
+      <YangiMahsulot
+        visible={yangiOchiq}
+        nom={search}
+        onQoshildi={(p) => { qosh(p); setYangiOchiq(false); }}
+        onClose={() => setYangiOchiq(false)}
+      />
 
       <ShtrixSkaner
         visible={skanerOchiq}
@@ -474,6 +517,10 @@ const s = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: spacing.md,
     paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
     borderBottomWidth: 1, borderBottomColor: colors.borderSoft,
+  },
+  yangiTaklif: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.md,
+    paddingHorizontal: spacing.md, paddingVertical: spacing.md,
   },
   royxat: {
     paddingHorizontal: spacing.lg, paddingTop: spacing.md,

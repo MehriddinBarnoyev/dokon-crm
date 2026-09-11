@@ -67,7 +67,7 @@ async function main() {
   await tx(async (c) => {
     for (const p of PRODUCTS) {
       await executeActions(c, ctx, [{
-        type: 'create_product',
+        type: 'create_product', id: null,
         name: p.name, unit: p.unit as any,
         cost_price: p.cost, sale_price: p.sale, stock: p.stock,
         category: (p as { cat?: string }).cat ?? null, barcode: null, photo_url: null,

@@ -128,7 +128,9 @@ export default async function productRoutes(app: FastifyInstance) {
 
     const [res] = await tx((c) => executeActions(c,
       { shopId: req.auth.shop_id, userId: req.auth.id, source: 'manual' },
-      [{ type: 'create_product', ...body }]));
+      // `id: null` — serverning o'zi bersin. Mijoz id'si faqat oflayn
+      // navbat uchun kerak (`/sync/flush`), bu yerda ulanish bor.
+      [{ type: 'create_product', id: null, ...body }]));
 
     if (body.min_stock > 0) {
       // `updated_at` va `shop_id` shart: birinchisisiz delta-sync bu

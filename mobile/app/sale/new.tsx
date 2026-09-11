@@ -15,8 +15,10 @@ import { useConfirm } from '../../src/components/Confirm';
 import { useToast } from '../../src/components/Toast';
 import { CustomerPicker, type PickedCustomer } from '../../src/components/CustomerPicker';
 import { ShtrixSkaner } from '../../src/components/ShtrixSkaner';
+import { YangiMahsulot } from '../../src/components/YangiMahsulot';
 import { search as fuzzySearch } from '../../src/lib/search';
 import * as productStore from '../../src/data/products';
+import * as cache from '../../src/lib/cache';
 import * as outbox from '../../src/lib/outbox';
 import * as chek from '../../src/lib/chek';
 import { haptic } from '../../src/lib/haptics';
@@ -232,6 +234,14 @@ export default function NewSaleScreen() {
   const [customer, setCustomer] = useState<PickedCustomer | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [skanerOchiq, setSkanerOchiq] = useState(false);
+  /**
+   * Katalogda yo'q mahsulotni SHU YERDA qo'shish.
+   *
+   * Ilgari do'konchi savatni tashlab Omborga o'tishi, mahsulot qo'shishi
+   * va qaytib butun savatni QAYTADAN yig'ishi kerak edi. Kassada navbat
+   * turganda bu bir mahsulot uchun butun savdoni boshdan boshlash degani.
+   */
+  const [yangiOchiq, setYangiOchiq] = useState(false);
   const [busy, setBusy] = useState(false);
 
   /**
@@ -260,6 +270,54 @@ export default function NewSaleScreen() {
   }, [products, search, cart]);
 
   const total = cart.reduce((s, l) => s + qatorJami(l), 0);
+
+  /* ------------------- Savatni yo'qotmaslik ------------------- */
+  /**
+   * Savat shifrlangan keshda ham turadi.
+   *
+   * Yangi mahsulot endi shu ekranning o'zida qo'shiladi, lekin savat
+   * boshqa sabablardan ham yo'qolishi mumkin: tasodifan orqaga bosildi,
+   * qo'ng'iroq keldi, Android ilovani xotiradan chiqarib tashladi.
+   * Kassada yarim yig'ilgan savatni qaytadan terish — xuddi shu og'riq.
+   *
+   * IKKI SOAT CHEGARASI. Undan eskisi tiklanmaydi: kechagi savat
+   * ertalab ochilib, tasodifan saqlanib ketishi ancha yomonroq bo'lardi.
+   */
+  const [tiklandi, setTiklandi] = useState(false);
+
+  const SAVAT = 'savat.qoralama';
+  const ESKIRISH_MS = 2 * 60 * 60 * 1000;
+
+  // Tiklash — bir marta, ekran ochilganda.
+  useEffect(() => {
+    let tirik = true;
+    (async () => {
+      if (!shop?.id) { setTiklandi(true); return; }
+      const saqlangan = await cache
+        .read<{ at: number; cart: CartLine[] }>(shop.id, SAVAT)
+        .catch(() => null);
+      if (!tirik) return;
+      if (saqlangan?.cart?.length && Date.now() - saqlangan.at < ESKIRISH_MS) {
+        setCart(saqlangan.cart);
+        toast.info('Tugallanmagan savat tiklandi');
+      }
+      setTiklandi(true);
+    })();
+    return () => { tirik = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shop?.id]);
+
+  // Saqlash — savat o'zgarganda. `tiklandi` shart: aks holda birinchi
+  // render bo'sh savatni yozib, tiklanadigan narsani o'chirib yuborardi.
+  useEffect(() => {
+    if (!tiklandi || !shop?.id) return;
+    if (cart.length === 0) {
+      cache.remove(shop.id, SAVAT).catch(() => {});
+      return;
+    }
+    cache.write(shop.id, SAVAT, { at: Date.now(), cart }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cart, tiklandi, shop?.id]);
 
   /* ---------------------- To'lov hisob-kitobi ---------------------- */
 
@@ -450,6 +508,9 @@ export default function NewSaleScreen() {
 
       if (res.error) throw new Error(res.error);
 
+      // Savdo yozildi — qoralama endi kerak emas.
+      if (shop?.id) await cache.remove(shop.id, SAVAT).catch(() => {});
+
       // Qoldiqlar o'zgardi — keyingi ekran cache'dagi eski raqamni
       // ko'rsatmasin.
       productStore.invalidate();
@@ -543,9 +604,22 @@ export default function NewSaleScreen() {
                     </Text>
                   )}
                   {filtered.length === 0 ? (
-                    <Text style={[font.small, { color: colors.textMuted, padding: spacing.md }]}>
-                      Topilmadi
-                    </Text>
+                    <Pressable
+                      onPress={() => setYangiOchiq(true)}
+                      style={s.yangiTaklif}
+                      accessibilityRole="button"
+                      accessibilityLabel={`"${search.trim()}" ni yangi mahsulot sifatida qo'shish`}
+                    >
+                      <Icon name="qoshish" size={20} color={colors.primary} />
+                      <View style={{ flex: 1 }}>
+                        <Text style={[font.body, { color: colors.primary }]} numberOfLines={1}>
+                          "{search.trim()}" ni qo'shish
+                        </Text>
+                        <Text style={[font.tiny, { color: colors.textMuted }]}>
+                          Shu yerda qo'shiladi — savat saqlanib qoladi
+                        </Text>
+                      </View>
+                    </Pressable>
                   ) : filtered.map((p) => (
                     <Pressable key={p.id} onPress={() => add(p)} style={s.suggestion}>
                       {p.photo_url
@@ -566,6 +640,28 @@ export default function NewSaleScreen() {
                       <Icon name="qoshish" size={22} color={colors.primary} />
                     </Pressable>
                   ))}
+
+                  {/* Ro'yxat bo'sh bo'lmaganda ham kerak: taxminiy
+                      natijalar chiqqanda izlangan mahsulot ular orasida
+                      bo'lmasligi mumkin. Busiz do'konchi yana Omborga
+                      chiqib ketardi va savat yo'qolardi. */}
+                  {filtered.length > 0 && search.trim().length >= 2 && (
+                    <Pressable
+                      onPress={() => setYangiOchiq(true)}
+                      style={[s.suggestion, { borderBottomWidth: 0 }]}
+                      accessibilityRole="button"
+                      accessibilityLabel={`"${search.trim()}" ni yangi mahsulot`
+                        + ' sifatida qo\'shish'}
+                    >
+                      <View style={[s.thumb, s.thumbBosh]}>
+                        <Icon name="qoshish" size={18} color={colors.primary} />
+                      </View>
+                      <Text style={[font.small, { color: colors.primary, flex: 1 }]}
+                        numberOfLines={1}>
+                        Ro'yxatda yo'qmi? "{search.trim()}" ni qo'shish
+                      </Text>
+                    </Pressable>
+                  )}
                 </View>
               )}
             </View>
@@ -715,6 +811,15 @@ export default function NewSaleScreen() {
         hint="Mahsulot shtrix-kodini ramka ichiga tuting"
       />
 
+      {/* Yangi mahsulot shu yerda qo'shiladi va DARHOL savatga tushadi —
+          ekran yopilmaydi, savat joyida qoladi. */}
+      <YangiMahsulot
+        visible={yangiOchiq}
+        nom={search}
+        onQoshildi={(p) => { add(p); setYangiOchiq(false); }}
+        onClose={() => setYangiOchiq(false)}
+      />
+
       <CustomerPicker
         visible={pickerOpen}
         value={customer}
@@ -822,6 +927,10 @@ const s = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: spacing.md,
     backgroundColor: colors.surfaceAlt,
     borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: 12,
+  },
+  yangiTaklif: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.md,
+    paddingHorizontal: spacing.md, paddingVertical: spacing.md,
   },
   payChip: {
     flex: 1, paddingVertical: 10, borderRadius: radius.md,

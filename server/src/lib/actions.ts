@@ -131,6 +131,20 @@ export const ActionSchema = z.discriminatedUnion('type', [
   /** Yangi mahsulot qo'shish */
   z.object({
     type: z.literal('create_product'),
+    /**
+     * MIJOZ BERGAN id (ixtiyoriy).
+     *
+     * Savdo paytida katalogda yo'q mahsulot chiqsa, do'konchi uni
+     * ekrandan chiqmasdan qo'shadi va DARHOL savatga soladi. Internet
+     * bo'lmasa mahsulot navbatga tushadi — lekin savdo ham o'sha
+     * navbatda va u mahsulotga ISHORA qilishi kerak. Server id bersa,
+     * u faqat ulanish tiklangach ma'lum bo'lardi va savdo qoldiqni
+     * o'zgartira olmasdi.
+     *
+     * Shuning uchun id'ni mijoz beradi. Navbat tartibli: `create_product`
+     * savdodan oldin yuboriladi.
+     */
+    id: uuid.nullable().default(null),
     name: z.string().min(1),
     unit: UnitSchema.default('dona'),
     cost_price: money.default(0),
@@ -458,21 +472,35 @@ export async function executeActions(
           categoryId = cat!.id;
         }
 
-        const row = await one<{ id: string }>(
-          `INSERT INTO products (shop_id, name, unit, cost_price, sale_price, stock, category_id, barcode, photo_url)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
-          [ctx.shopId, a.name, a.unit, a.cost_price, a.sale_price, a.stock,
-           categoryId, a.barcode, a.photo_url], c);
+        // `ON CONFLICT DO NOTHING` — ayni id ikkinchi marta kelsa (navbat
+        // qayta yuborilgan, mutatsiya jurnali tozalangan) mahsulot
+        // ikkilanmasin va xato ham bermasin.
+        const yozildi = await one<{ id: string }>(
+          a.id
+            ? `INSERT INTO products (id, shop_id, name, unit, cost_price, sale_price, stock, category_id, barcode, photo_url)
+               VALUES ($10,$1,$2,$3,$4,$5,$6,$7,$8,$9)
+               ON CONFLICT (id) DO NOTHING RETURNING id`
+            : `INSERT INTO products (shop_id, name, unit, cost_price, sale_price, stock, category_id, barcode, photo_url)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
+          a.id
+            ? [ctx.shopId, a.name, a.unit, a.cost_price, a.sale_price, a.stock,
+               categoryId, a.barcode, a.photo_url, a.id]
+            : [ctx.shopId, a.name, a.unit, a.cost_price, a.sale_price, a.stock,
+               categoryId, a.barcode, a.photo_url], c);
 
-        if (a.stock > 0) {
+        // Konflikt bo'lsa `yozildi` bo'sh: mahsulot allaqachon bor.
+        const row = yozildi ?? { id: a.id! };
+        const yangiYozildi = yozildi !== null;
+
+        if (yangiYozildi && a.stock > 0) {
           await query(
             `INSERT INTO stock_moves (shop_id, product_id, type, qty, stock_after, ref_type, note, user_id)
              VALUES ($1,$2,'kirim',$3,$3,'manual','Boshlang''ich qoldiq',$4)`,
-            [ctx.shopId, row!.id, a.stock, ctx.userId], c);
+            [ctx.shopId, row.id, a.stock, ctx.userId], c);
         }
 
         out.push({
-          type: 'create_product', id: row!.id, warnings: [],
+          type: 'create_product', id: row.id, warnings: [],
           summary: `Yangi mahsulot: ${a.name} (${a.sale_price ? fmt(a.sale_price) + " so'm/" + a.unit : a.unit})`,
         });
         break;
