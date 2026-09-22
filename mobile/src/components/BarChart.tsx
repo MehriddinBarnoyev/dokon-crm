@@ -59,7 +59,6 @@ export function BarChart({ bars, height = 108, caption }: {
       </View>
 
       <View style={[s.plot, { height }]}>
-        {/* Yordamchi chiziq — ustunlar qaysi darajada ekani ko'rinsin */}
         <View style={[s.guide, { bottom: height * 0.5 }]} />
         <View style={[s.guide, { bottom: height - 1 }]} />
 

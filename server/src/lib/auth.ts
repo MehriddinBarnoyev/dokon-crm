@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { one } from '../db.js';
+import { one, query } from '../db.js';
 
 export interface AuthUser {
   id: string;
@@ -45,6 +45,70 @@ async function foydalanuvchiYaroqli(userId: string, shopId: string): Promise<boo
   return yaroqli;
 }
 
+/**
+ * QURILMA KUZATUVI — xavfsizlik uchun.
+ *
+ * Ilova har so'rovda o'z qurilmasi haqida header yuboradi (`X-Device-Id`
+ * va h.k. — mobil tomonda `src/lib/device.ts`). Bu yerda uni yozib
+ * boramiz: kim, qaysi qurilmadan va qachondan beri kirib turgani
+ * ko'rinishi kerak — shubhali (o'g'irlangan token, begona telefon)
+ * kirishni sezish shundan boshlanadi.
+ *
+ * Har so'rovda bazaga yozmaymiz — headerlar deyarli hech qachon
+ * o'zgarmaydi, faqat `foydalanuvchiYaroqli` kabi keshlanadi.
+ */
+const QURILMA_MUDDATI = 60 * 60_000; // 1 soat
+const qurilmaKeshi = new Map<string, number>();
+
+interface QurilmaHeaderlari {
+  deviceId: string;
+  platform?: string;
+  model?: string;
+  osVersion?: string;
+  appVersion?: string;
+}
+
+function qurilmaHeaderlariniOl(req: FastifyRequest): QurilmaHeaderlari | null {
+  const deviceId = req.headers['x-device-id'];
+  if (typeof deviceId !== 'string' || !deviceId) return null;
+
+  const ol = (nom: string) => {
+    const v = req.headers[nom];
+    return typeof v === 'string' && v ? v.slice(0, 200) : undefined;
+  };
+  return {
+    deviceId: deviceId.slice(0, 200),
+    platform: ol('x-device-platform'),
+    model: ol('x-device-model'),
+    osVersion: ol('x-device-os-version'),
+    appVersion: ol('x-app-version'),
+  };
+}
+
+async function qurilmaniQayd(userId: string, h: QurilmaHeaderlari) {
+  const kalit = `${userId}:${h.deviceId}`;
+  const hozir = Date.now();
+  const oxirgi = qurilmaKeshi.get(kalit);
+  if (oxirgi && hozir - oxirgi < QURILMA_MUDDATI) return;
+  qurilmaKeshi.set(kalit, hozir);
+
+  await query(
+    `INSERT INTO user_devices (user_id, device_id, platform, model, os_version, app_version)
+     VALUES ($1,$2,$3,$4,$5,$6)
+     ON CONFLICT (user_id, device_id) DO UPDATE
+        SET last_seen_at = now(),
+            platform     = EXCLUDED.platform,
+            model        = EXCLUDED.model,
+            os_version   = EXCLUDED.os_version,
+            app_version  = EXCLUDED.app_version`,
+    [userId, h.deviceId, h.platform ?? null, h.model ?? null, h.osVersion ?? null, h.appVersion ?? null],
+  ).catch(() => {
+    // Yozib bo'lmasa ham so'rov davom etadi — bu faqat kuzatuv,
+    // foydalanuvchining ishini to'xtatmasligi kerak.
+    qurilmaKeshi.delete(kalit);
+  });
+}
+
 /** Himoyalangan marshrutlar uchun: tokenni tekshirib, req.auth ni to'ldiradi. */
 export async function requireAuth(req: FastifyRequest, reply: FastifyReply) {
   let auth: AuthUser;
@@ -63,6 +127,9 @@ export async function requireAuth(req: FastifyRequest, reply: FastifyReply) {
   }
 
   req.auth = auth;
+
+  const qurilma = qurilmaHeaderlariniOl(req);
+  if (qurilma) void qurilmaniQayd(auth.id, qurilma);
 }
 
 /** Faqat do'kon egasi bajara oladigan amallar uchun. */

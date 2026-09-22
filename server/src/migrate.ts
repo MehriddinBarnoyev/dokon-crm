@@ -31,6 +31,7 @@ const TARTIB = [
   '005-shtrix.sql',
   // 006 `daily_summary` ni qayta yaratadi — 004 dan KEYIN turishi shart.
   '006-tovar.sql',
+  '007-qurilmalar.sql',
 ];
 
 /** Ulanish xatosimi (bazaga umuman yetib bo'lmadi) yoki boshqa xatomi? */

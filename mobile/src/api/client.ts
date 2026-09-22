@@ -8,6 +8,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import Constants from 'expo-constants';
+import { qurilmaHeaderlari } from '../lib/device';
 
 const TOKEN_KEY = 'dokon.token';
 
@@ -175,7 +176,13 @@ async function soraw<T>(
   body: unknown,
   timeoutMs: number,
 ): Promise<T> {
-  const token = await getToken();
+  // Qurilma headerlari xavfsizlik uchun — token o'g'irlansa ham, qaysi
+  // qurilmadan kirilayotgani serverda ko'rinib turadi (`lib/auth.ts`).
+  // Ololmasak ham so'rov davom etadi: bu asosiy oqimni to'xtatmasligi kerak.
+  const [token, deviceHeaders] = await Promise.all([
+    getToken(),
+    qurilmaHeaderlari().catch(() => ({})),
+  ]);
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -188,6 +195,7 @@ async function soraw<T>(
         // JSON tanasini xato deb rad etadi (DELETE so'rovlarida chiqadi).
         ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...deviceHeaders,
       },
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: controller.signal,
