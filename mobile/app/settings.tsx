@@ -147,9 +147,10 @@ export default function SettingsScreen() {
                   >
                     <Text style={[font.smallBold, { color: colors.primary }]}>Qayta</Text>
                   </PressScale>
-                  <PressScale
-                    accessibilityRole="button"
-                    accessibilityLabel="O'chirish"
+                  <IconButton
+                    name="yopish"
+                    label="O'chirish"
+                    size={16}
                     onPress={async () => {
                       const ok = await confirm({
                         title: 'O\'zgarishni tashlash',
@@ -163,10 +164,7 @@ export default function SettingsScreen() {
                       await outbox.radniOchir(r.id);
                       await yuklaNavbat();
                     }}
-                    scale={0.94}
-                  >
-                    <Icon name="yopish" size={16} color={colors.textFaint} />
-                  </PressScale>
+                  />
                 </View>
               ))}
             </Card>
