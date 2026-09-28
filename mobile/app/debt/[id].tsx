@@ -435,8 +435,33 @@ export default function DebtDetail() {
             <Text style={[font.small, { color: colors.textMuted }]}>Hali yozuv yo'q</Text>
           ) : tarix.items.map((h) => {
             const isPayment = Number(h.amount) < 0;
+            // Savdodan avtomatik yozilgan qarzni bu yerdan o'zgartirib
+            // bo'lmaydi (server ham rad etadi) — faqat qo'lda kiritilgani
+            // bosiladi.
+            const tahrirlanadi = !h.sale_id;
+            const Qator = tahrirlanadi ? PressScale : View;
+
             return (
-              <View key={h.id} style={s.row}>
+              <Qator
+                key={h.id}
+                style={s.row}
+                {...(tahrirlanadi ? {
+                  accessibilityRole: 'button' as const,
+                  accessibilityLabel: `${isPayment ? "To'lov" : 'Qarz'} yozuvini tahrirlash`,
+                  onPress: () => router.push({
+                    pathname: '/debt/entry/[id]',
+                    params: {
+                      id: h.id,
+                      customerName: d.name,
+                      amount: String(Math.abs(Number(h.amount))),
+                      isPayment: isPayment ? '1' : '0',
+                      dueDate: h.due_date ?? '',
+                      note: h.note ?? '',
+                      createdAt: h.created_at,
+                    },
+                  }),
+                } : {})}
+              >
                 <View style={[s.dot, {
                   backgroundColor: isPayment ? colors.successSoft : colors.dangerSoft,
                 }]}>
@@ -463,7 +488,10 @@ export default function DebtDetail() {
                 }]}>
                   {isPayment ? '−' : '+'}{money(Math.abs(Number(h.amount)))}
                 </Text>
-              </View>
+                {tahrirlanadi ? (
+                  <Icon name="oldinga" size={14} color={colors.textFaint} />
+                ) : null}
+              </Qator>
             );
           })}
 

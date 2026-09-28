@@ -29,6 +29,7 @@ import type pg from 'pg';
 import { one, query, tx } from '../db.js';
 import { requireAuth } from '../lib/auth.js';
 import { ActionSchema, executeActions, type ActionResult } from '../lib/actions.js';
+import { deleteDebtEntry, patchDebtEntry } from '../lib/debtEdits.js';
 
 /**
  * `ActionSchema` qamramaydigan o'zgarishlar.
@@ -74,6 +75,19 @@ const QoshimchaSchema = z.discriminatedUnion('kind', [
       sale_price: z.number().nonnegative().nullable().default(null),
     })).min(1),
     note: z.string().nullable().default(null),
+  }),
+  /** Qarz/to'lov yozuvini tuzatish — xato mijoz/summa bosilganda. */
+  z.object({
+    kind: z.literal('debt_update'),
+    id: z.string().uuid(),
+    amount: z.number().positive().optional(),
+    due_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+    note: z.string().nullable().optional(),
+  }),
+  /** Faqat do'kon egasi — `bajar()` da tekshiriladi. */
+  z.object({
+    kind: z.literal('debt_delete'),
+    id: z.string().uuid(),
   }),
   z.object({
     kind: z.literal('product_update'),
@@ -128,6 +142,7 @@ export default async function flushRoutes(app: FastifyInstance) {
     const ctx = {
       shopId: req.auth.shop_id,
       userId: req.auth.id,
+      role: req.auth.role,
       source: 'manual' as const,
     };
 
@@ -202,7 +217,7 @@ function xatoMatni(kind: string, err: z.ZodError): string {
 
 async function bajar(
   c: pg.PoolClient,
-  ctx: { shopId: string; userId: string | null; source: 'manual' },
+  ctx: { shopId: string; userId: string | null; role: 'owner' | 'seller'; source: 'manual' },
   kind: string,
   body: Record<string, unknown>,
 ): Promise<unknown> {
@@ -240,6 +255,21 @@ async function bajar(
         RETURNING id`, [a.id, ctx.shopId], c);
     if (!row) throw new Error('Chiqim topilmadi');
     return { ok: true, id: a.id };
+  }
+
+  if (a.kind === 'debt_update') {
+    return patchDebtEntry(ctx.shopId, a.id, { amount: a.amount, due_date: a.due_date, note: a.note }, c);
+  }
+
+  if (a.kind === 'debt_delete') {
+    // REST yo'lida `requireOwner` shu ishni qiladi; navbat orqali
+    // kelganda rolni ATAYLAB shu yerda tekshiramiz — aks holda sotuvchi
+    // faqat tugmasi yashirilgan, lekin serverda taqiqlanmagan amalni
+    // to'g'ridan-to'g'ri navbatga yozib bajartira olardi.
+    if (ctx.role !== 'owner') {
+      throw new Error("Bu amal faqat do'kon egasi uchun");
+    }
+    return deleteDebtEntry(ctx.shopId, a.id, c);
   }
 
   if (a.kind === 'expense_to_purchase') {

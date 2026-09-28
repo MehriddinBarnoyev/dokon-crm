@@ -40,7 +40,8 @@ export interface Debtor {
 
 export interface DebtEntry {
   id: string; amount: number; due_date: string | null;
-  note: string | null; created_at: string; sale_id: string | null; user_name: string | null;
+  note: string | null; created_at: string; updated_at?: string;
+  sale_id: string | null; user_name: string | null;
 }
 
 /**

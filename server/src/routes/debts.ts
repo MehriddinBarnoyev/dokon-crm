@@ -1,8 +1,9 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { one, query, tx } from '../db.js';
-import { requireAuth } from '../lib/auth.js';
+import { requireAuth, requireOwner } from '../lib/auth.js';
 import { executeActions } from '../lib/actions.js';
+import { deleteDebtEntry, patchDebtEntry } from '../lib/debtEdits.js';
 
 /** Bir sahifadagi qarz yozuvlari soni. */
 const TARIX_SAHIFA = 20;
@@ -11,10 +12,10 @@ const XARID_SAHIFA = 10;
 
 /** Qarz tarixi — birinchi sahifa ham, keyingilari ham shu so'rov bilan. */
 const TARIX_SQL = (keyset: string, limitIndex: number) =>
-  `SELECT d.id, d.amount, d.due_date, d.note, d.created_at, d.sale_id,
+  `SELECT d.id, d.amount, d.due_date, d.note, d.created_at, d.updated_at, d.sale_id,
           u.name AS user_name
      FROM debts d LEFT JOIN users u ON u.id = d.user_id
-    WHERE d.customer_id = $1 AND d.shop_id = $2${keyset}
+    WHERE d.customer_id = $1 AND d.shop_id = $2 AND d.deleted_at IS NULL${keyset}
     ORDER BY d.created_at DESC, d.id DESC
     LIMIT $${limitIndex}`;
 
@@ -213,6 +214,44 @@ export default async function debtRoutes(app: FastifyInstance) {
       return res;
     } catch (e: any) {
       return reply.code(400).send({ error: e.message });
+    }
+  });
+
+  /**
+   * Qarz/to'lov yozuvini tahrirlash. Bir xil mantiq offline navbat
+   * (`debt_update`, `routes/flush.ts`) bilan — `lib/debtEdits.ts`.
+   */
+  app.patch('/:id', async (req, reply) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const body = z.object({
+      amount: z.number().positive().optional(),
+      due_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+      note: z.string().nullable().optional(),
+    }).parse(req.body);
+
+    if (body.amount === undefined && body.due_date === undefined && body.note === undefined) {
+      return reply.code(400).send({ error: "O'zgartirish uchun maydon berilmadi" });
+    }
+
+    try {
+      return await patchDebtEntry(req.auth.shop_id, id, body);
+    } catch (e: any) {
+      return reply.code(e.message === 'Yozuv topilmadi' ? 404 : 400).send({ error: e.message });
+    }
+  });
+
+  /**
+   * O'chirish — faqat do'kon egasi (pulga tegishli, qaytarib bo'lmaydigan
+   * amal; `expenses`dagi kabi yumshoq — `deleted_at` qo'yiladi).
+   */
+  app.delete('/:id', { preHandler: requireOwner }, async (req, reply) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+
+    try {
+      const row = await deleteDebtEntry(req.auth.shop_id, id);
+      return { ok: true, id: row.id };
+    } catch (e: any) {
+      return reply.code(e.message === 'Yozuv topilmadi' ? 404 : 400).send({ error: e.message });
     }
   });
 

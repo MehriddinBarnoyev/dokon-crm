@@ -152,6 +152,7 @@ export default async function reportRoutes(app: FastifyInstance) {
       query(`SELECT d.id, d.amount, d.note, d.created_at, c.name AS customer_name
                FROM debts d JOIN customers c ON c.id = d.customer_id
               WHERE d.shop_id = $2
+                AND d.deleted_at IS NULL
                 AND d.created_at >= ${bounds}
                 AND d.created_at < ${keyingiKun}
               ORDER BY d.created_at DESC`, [date, shop]),
