@@ -91,6 +91,26 @@ export default function SettingsScreen() {
           </View>
         </Card>
 
+        {/* Xodimlar — faqat do'kon egasi. Kim savdo qildi, kim qarz
+            berdi/yig'di shu yerdan ko'rinadi. */}
+        {user?.role === 'owner' && (
+          <>
+            <SectionTitle>Xodimlar</SectionTitle>
+            <Card
+              onPress={() => router.push('/staff')}
+              style={{ paddingVertical: spacing.sm }}
+            >
+              <View style={s.info}>
+                <Icon name="xodimlar" size={18} color={colors.textFaint} />
+                <Text style={[font.body, { color: colors.text, flex: 1 }]}>
+                  Xodimlarni boshqarish
+                </Text>
+                <Icon name="oldinga" size={16} color={colors.textFaint} />
+              </View>
+            </Card>
+          </>
+        )}
+
         {/* Yuborilmagan o'zgarishlar */}
         {(navbat.length > 0 || radEtilgan.length > 0) && (
           <>

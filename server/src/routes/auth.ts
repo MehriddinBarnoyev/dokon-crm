@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
-import { one, tx } from '../db.js';
+import { one, query, tx } from '../db.js';
 import { requireAuth } from '../lib/auth.js';
 import { KOD, SQL_TEL_MOS, SQL_TEL_TARTIB, XONA, telMilliy, telNormal } from '../lib/telefon.js';
 
@@ -119,6 +119,83 @@ export default async function authRoutes(app: FastifyInstance) {
        VALUES ($1,$2,$3,$4,'seller') RETURNING id, name, phone, role`,
       [req.auth.shop_id, body.phone, body.name, hash]);
     return user;
+  });
+
+  /**
+   * XODIMLAR RO'YXATI — faqat do'kon egasi.
+   *
+   * Kim savdo qilgani, kim qarz berib/yig'ib yurgani ilgari hech qayerda
+   * ko'rinmasdi — bazada `user_id` bor edi, lekin uni ko'rsatadigan ekran
+   * yo'q edi. Bugungi faoliyat shu ro'yxatning o'zida: alohida "statistika"
+   * ekrani ochish shart emas, do'kon egasi bir qarashda "kim nima qildi"ni
+   * ko'radi.
+   */
+  app.get('/staff', { preHandler: requireAuth }, async (req, reply) => {
+    if (req.auth.role !== 'owner') {
+      return reply.code(403).send({ error: "Faqat do'kon egasi ko'ra oladi" });
+    }
+    return query(
+      `SELECT u.id, u.name, u.phone, u.role, u.is_active, u.created_at,
+              COALESCE(s.soni, 0)::int AS today_sales_count,
+              COALESCE(s.summa, 0)     AS today_sales_total,
+              COALESCE(qb.summa, 0)    AS today_debt_given,
+              COALESCE(qt.summa, 0)    AS today_debt_collected
+         FROM users u
+         LEFT JOIN (
+                SELECT user_id, COUNT(*) AS soni, SUM(total) AS summa
+                  FROM sales
+                 WHERE shop_id = $1 AND dokon_kun(created_at) = dokon_kun(now())
+                 GROUP BY user_id
+              ) s ON s.user_id = u.id
+         LEFT JOIN (
+                -- Qarz BERILGANI (amount > 0) — savdodan chiqqani ham,
+                -- qo'lda yozilgani ham.
+                SELECT user_id, SUM(amount) AS summa
+                  FROM debts
+                 WHERE shop_id = $1 AND deleted_at IS NULL AND amount > 0
+                   AND dokon_kun(created_at) = dokon_kun(now())
+                 GROUP BY user_id
+              ) qb ON qb.user_id = u.id
+         LEFT JOIN (
+                -- Qarz YIG'ILGANI (amount < 0 — to'lov).
+                SELECT user_id, SUM(-amount) AS summa
+                  FROM debts
+                 WHERE shop_id = $1 AND deleted_at IS NULL AND amount < 0
+                   AND dokon_kun(created_at) = dokon_kun(now())
+                 GROUP BY user_id
+              ) qt ON qt.user_id = u.id
+        WHERE u.shop_id = $1
+        ORDER BY (u.role = 'owner') DESC, u.name`, [req.auth.shop_id]);
+  });
+
+  /**
+   * Xodimni faollashtirish/blokirovka qilish.
+   *
+   * O'CHIRILMAYDI — faqat `is_active = false`. Xodim ishdan ketsa ham
+   * uning yozgan savdo, qarz va chiqimlari tarixda qolishi kerak.
+   * Bloklangan xodim `/auth/login`da rad etiladi (`lib/auth.ts` → `is_active`).
+   */
+  app.patch('/staff/:id', { preHandler: requireAuth }, async (req, reply) => {
+    if (req.auth.role !== 'owner') {
+      return reply.code(403).send({ error: "Faqat do'kon egasi o'zgartira oladi" });
+    }
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const body = z.object({ is_active: z.boolean() }).parse(req.body);
+
+    if (id === req.auth.id) {
+      return reply.code(400).send({ error: "O'zingizni bloklay olmaysiz" });
+    }
+    const target = await one<{ role: string }>(
+      `SELECT role FROM users WHERE id = $1 AND shop_id = $2`, [id, req.auth.shop_id]);
+    if (!target) return reply.code(404).send({ error: 'Xodim topilmadi' });
+    if (target.role === 'owner') {
+      return reply.code(400).send({ error: "Do'kon egasini bloklab bo'lmaydi" });
+    }
+
+    return one(
+      `UPDATE users SET is_active = $1 WHERE id = $2 AND shop_id = $3
+        RETURNING id, name, phone, role, is_active, created_at`,
+      [body.is_active, id, req.auth.shop_id]);
   });
 
   app.get('/me', { preHandler: requireAuth }, async (req) => {

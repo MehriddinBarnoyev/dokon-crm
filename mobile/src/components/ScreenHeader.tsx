@@ -10,13 +10,15 @@ import { colors, font, spacing } from '../theme';
 import { IconButton } from './ui';
 import { type IconName } from './Icon';
 
-export function ScreenHeader({ title, subtitle, eyebrow, action, left }: {
+export function ScreenHeader({ title, subtitle, eyebrow, action, secondaryAction, left }: {
   title: string;
   /** Sarlavha ostidagi qatorda: "12 ta mahsulot · 4.2 mln so'mlik tovar" */
   subtitle?: string;
   /** Sarlavha ustidagi kichik qator: "Assalomu alaykum, Alisher" */
   eyebrow?: string;
   action?: { icon: IconName; label: string; onPress: () => void };
+  /** Asosiy tugma yonida, undan chapda turadi (masalan: "Sanaga o'tish"). */
+  secondaryAction?: { icon: IconName; label: string; onPress: () => void };
   left?: React.ReactNode;
 }) {
   return (
@@ -35,6 +37,12 @@ export function ScreenHeader({ title, subtitle, eyebrow, action, left }: {
           </Text>
         ) : null}
       </View>
+      {secondaryAction ? (
+        <IconButton
+          name={secondaryAction.icon} label={secondaryAction.label} onPress={secondaryAction.onPress}
+          tone="soft" size={22}
+        />
+      ) : null}
       {action ? (
         <IconButton
           name={action.icon} label={action.label} onPress={action.onPress}

@@ -49,7 +49,7 @@ export default function ExpensesScreen() {
     const from = kunKaliti(new Date(Date.now() - (kun - 1) * 864e5));
     return api<Expense[]>(`/expenses?from=${from}&limit=500`);
   }, [kun]);
-  const { data: items, yangila: load } = useKeshlangan<Expense[]>(`expenses.${kun}`, olib);
+  const { data: items, xato, yangila: load } = useKeshlangan<Expense[]>(`expenses.${kun}`, olib);
 
   useFocusEffect(useCallback(() => { load().catch(() => {}); }, [load]));
 
@@ -135,7 +135,14 @@ export default function ExpensesScreen() {
       </View>
 
       {!items ? (
-        <View style={{ paddingHorizontal: spacing.lg }}><SkeletonList /></View>
+        xato ? (
+          <Empty
+            icon="ogohlantirish" title="Yuklab bo'lmadi" hint={xato}
+            action={{ title: 'Qayta urinish', icon: 'yangilash', onPress: () => load().catch(() => {}) }}
+          />
+        ) : (
+          <View style={{ paddingHorizontal: spacing.lg }}><SkeletonList /></View>
+        )
       ) : (
         <SectionList
           sections={sections}

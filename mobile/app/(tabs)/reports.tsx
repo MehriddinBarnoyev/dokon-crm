@@ -62,11 +62,27 @@ interface InvValue {
   out_of_stock: number; low_stock: number;
 }
 
+/**
+ * "Hammasi" — do'kon shu ilova orqali ishlagan BARCHA vaqt.
+ *
+ * Serverda haqiqiy "cheksiz" so'rov yo'q — `days` bilan so'raladi (server
+ * `max(3650)` ga ruxsat beradi, `server/src/routes/reports.ts`). 10 yil
+ * amalda "hammasi" bilan bir xil: hech bir do'kon shuncha vaqt shu bitta
+ * hisobni ishlatmagan bo'ladi, lekin so'rov baribir chegaralangan qoladi.
+ */
+const HAMMASI_KUN = 3650;
+
 const DAVRLAR = [
   { label: '7 kun', days: 7 },
   { label: '30 kun', days: 30 },
   { label: '90 kun', days: 90 },
+  { label: 'Hammasi', days: HAMMASI_KUN },
 ] as const;
+
+/** Sarlavhalarda "3650 kun" chiqib ketmasin — "Hammasi" tanlanganda o'z nomi. */
+function davrNomi(days: number): string {
+  return days === HAMMASI_KUN ? 'hammasi' : `so'nggi ${days} kun`;
+}
 
 export default function ReportsScreen() {
   const router = useRouter();
@@ -166,7 +182,7 @@ export default function ReportsScreen() {
           turadi) — shuning uchun bu yerda o'z "orqaga"si bo'lishi kerak. */}
       <ScreenHeader
         title="Hisobot"
-        subtitle={`so'nggi ${days} kun`}
+        subtitle={davrNomi(days)}
         left={
           <IconButton
             name="orqaga" label="Orqaga" tone="soft" size={22}
@@ -208,7 +224,7 @@ export default function ReportsScreen() {
             <Animated.View entering={FadeInDown.duration(280)}>
               <Card tone="raised">
                 <Text style={[font.label, { color: colors.textMuted }]}>
-                  {days} KUNLIK SOF FOYDA
+                  {days === HAMMASI_KUN ? 'HAMMA VAQT' : `${days} KUNLIK`} SOF FOYDA
                 </Text>
                 <View style={s.moneyRow}>
                   <AnimatedMoney

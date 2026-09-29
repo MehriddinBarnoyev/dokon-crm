@@ -1,5 +1,5 @@
 import { Stack, useRouter, useSegments } from 'expo-router';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { View, Text } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -16,8 +16,21 @@ import { colors, font, radius, spacing, elevation } from '../src/theme';
  * Ilova ochilayotgandagi ekran.
  * Bo'sh oq ekran o'rniga logotip — birinchi soniyadayoq "yuklanyapti,
  * qotib qolgani yo'q" degan xabar beradi.
+ *
+ * UZOQ KUTISH. Render'ning bepul serveri 15 daqiqa harakatsizlikdan keyin
+ * uxlaydi — keshda seans bo'lmasa (yangi o'rnatish yoki chiqishdan keyin),
+ * birinchi kirish serverni uyg'otguncha o'nlab soniya cho'zilishi mumkin
+ * (`api/auth.tsx` → `seansniSora`). Shu vaqt davomida ekran nima
+ * bo'layotganini aytmasa, "qotib qoldimi?" degan taassurot qoladi.
  */
 function Splash() {
+  const [uzoq, setUzoq] = useState(false);
+
+  useEffect(() => {
+    const t = setTimeout(() => setUzoq(true), 6000);
+    return () => clearTimeout(t);
+  }, []);
+
   return (
     <View style={{
       flex: 1, alignItems: 'center', justifyContent: 'center',
@@ -35,6 +48,16 @@ function Splash() {
         <Icon name="dokon" size={40} color={colors.primary} />
       </Animated.View>
       <Text style={[font.small, { color: colors.textFaint }]}>Do'kon CRM</Text>
+      {uzoq && (
+        <Animated.Text
+          entering={FadeIn.duration(400)}
+          style={[font.tiny, {
+            color: colors.textFaint, textAlign: 'center', paddingHorizontal: spacing.xxl,
+          }]}
+        >
+          Server uyg'onyapti — birinchi kirish biroz vaqt olishi mumkin
+        </Animated.Text>
+      )}
     </View>
   );
 }
@@ -76,6 +99,8 @@ function AuthGate() {
       <Stack.Screen name="debt/[id]" />
       <Stack.Screen name="purchases/index" />
       <Stack.Screen name="day/[date]" />
+      <Stack.Screen name="staff/index" />
+      <Stack.Screen name="staff/new" options={{ presentation: 'modal' }} />
     </Stack>
   );
 }

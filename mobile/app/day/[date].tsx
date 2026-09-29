@@ -30,6 +30,8 @@ interface DayExpense {
 interface DayDebt {
   id: string; amount: number; note: string | null;
   created_at: string; customer_name: string;
+  /** Kim yozgan — qarz berilganda va to'lov qabul qilinganda. */
+  user_name: string | null;
 }
 interface DayReport {
   day: string;
@@ -296,6 +298,13 @@ export default function DayScreen() {
                     <Badge text={sale.payment_method}
                       tone={qarz > 0 ? 'warning' : 'success'} />
                     {sale.source === 'ai' ? <Badge text="AI" tone="accent" /> : null}
+                    {/* Kim sotgani — bir nechta xodim ishlaydigan do'konda
+                        muhim: kunlik savdoni kim yozgani shu yerdan ko'rinadi. */}
+                    {sale.seller_name ? (
+                      <Text style={[font.tiny, { color: colors.textFaint }]} numberOfLines={1}>
+                        {sale.seller_name}
+                      </Text>
+                    ) : null}
                   </View>
                 </Pressable>
               );
@@ -353,6 +362,9 @@ export default function DayScreen() {
                       <Text style={[font.body, { color: colors.text }]}>{d.customer_name}</Text>
                       <Text style={[font.tiny, { color: colors.textMuted }]}>
                         {tolov ? "To'lov qildi" : 'Qarz oldi'}
+                        {/* Kim qabul qildi / kim berdi — bir nechta xodim
+                            ishlaydigan do'konda kunlik hisobot shu yerdan. */}
+                        {d.user_name ? ` · ${d.user_name}` : ''}
                       </Text>
                     </View>
                     <Text style={[font.num, {

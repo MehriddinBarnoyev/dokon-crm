@@ -1,5 +1,7 @@
-import { useCallback, useMemo, useState } from 'react';
-import { RefreshControl, SectionList, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  Modal, Pressable, RefreshControl, SectionList, StyleSheet, Text, TextInput, View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import Animated, { FadeIn } from 'react-native-reanimated';
@@ -11,13 +13,15 @@ import { SkeletonList } from '../../src/components/Skeleton';
 import { PressScale } from '../../src/components/Press';
 import { useConfirm } from '../../src/components/Confirm';
 import { useKeshlangan } from '../../src/lib/keshRoyxat';
+import { useKeyboardHeight } from '../../src/lib/keyboard';
+import { sanaOqi } from '../../src/lib/sana';
 import * as chek from '../../src/lib/chek';
 import { useAuth } from '../../src/api/auth';
 import { Button } from '../../src/components/ui';
 import { useToast } from '../../src/components/Toast';
 import {
   colors, dateLabel, elevation, font, kunKaliti, money, qty, radius,
-  sanaToliq, spacing,
+  sanaMatni, sanaToliq, spacing,
 } from '../../src/theme';
 import { Icon } from '../../src/components/Icon';
 
@@ -31,6 +35,75 @@ function kunNomi(iso: string): string {
   return sanaToliq(new Date(`${iso}T12:00:00`));
 }
 
+/**
+ * SANAGA O'TISH.
+ *
+ * Ro'yxatda oxirgi 100 ta savdo bor, eski kunni topish uchun o'nlab
+ * kartochka orasidan scroll qilish kerak edi. Bu yerda sana to'g'ridan-
+ * to'g'ri yoziladi (`lib/sana.ts` — "15.08" ham, "2026-08-15" ham qabul
+ * qiladi, xuddi qarz ekranidagi eski daftar sanasi kabi) va `/day/[date]`
+ * ga o'tkaziladi — ro'yxatda bor-yo'qligidan qat'i nazar.
+ */
+function SanaModal({ visible, onClose, onPick }: {
+  visible: boolean;
+  onClose: () => void;
+  onPick: (iso: string) => void;
+}) {
+  const [matn, setMatn] = useState('');
+  const kb = useKeyboardHeight();
+  const iso = sanaOqi(matn);
+  const bugun = kunKaliti(new Date());
+  const kecha = kunKaliti(new Date(Date.now() - 864e5));
+
+  useEffect(() => { if (visible) setMatn(''); }, [visible]);
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable style={sm.backdrop} onPress={onClose}>
+        <Pressable
+          style={[sm.sheet, kb > 0 && { paddingBottom: kb + spacing.md, maxHeight: '100%' }]}
+          onPress={() => {}}
+        >
+          <View style={sm.head}>
+            <Text style={[font.h3, { color: colors.text, flex: 1 }]}>Sanaga o'tish</Text>
+            <Pressable onPress={onClose} hitSlop={10}>
+              <Icon name="yopish" size={22} color={colors.textMuted} />
+            </Pressable>
+          </View>
+
+          <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+            <Pressable onPress={() => onPick(bugun)} style={sm.tezTugma}>
+              <Text style={[font.small, { color: colors.primary }]}>Bugun</Text>
+            </Pressable>
+            <Pressable onPress={() => onPick(kecha)} style={sm.tezTugma}>
+              <Text style={[font.small, { color: colors.primary }]}>Kecha</Text>
+            </Pressable>
+          </View>
+
+          <TextInput
+            style={sm.input}
+            placeholder="15.08 yoki 2026-08-15"
+            placeholderTextColor={colors.textFaint}
+            value={matn}
+            onChangeText={setMatn}
+            keyboardType="numeric"
+            autoFocus
+            onSubmitEditing={() => iso && onPick(iso)}
+            accessibilityLabel="Sana"
+          />
+          {matn.trim() !== '' && (
+            <Text style={[font.tiny, { color: iso ? colors.textMuted : colors.danger }]}>
+              {iso ? sanaMatni(iso) : "Sanani tushunmadim"}
+            </Text>
+          )}
+
+          <Button title="O'tish" onPress={() => iso && onPick(iso)} disabled={!iso} />
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
 export default function SalesScreen() {
   const router = useRouter();
   const { shop } = useAuth();
@@ -38,14 +111,23 @@ export default function SalesScreen() {
   const toast = useToast();
   const [refreshing, setRefreshing] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
+  const [sanaOchiq, setSanaOchiq] = useState(false);
 
   // Keshdan darhol chiziladi, so'ng serverdan yangilanadi — `lib/keshRoyxat`.
   const olib = useCallback(() => api<Sale[]>('/sales?limit=100'), []);
-  const { data: items, yangila: load } = useKeshlangan<Sale[]>('sales', olib);
+  const { data: items, xato, yangila: load } = useKeshlangan<Sale[]>('sales', olib);
+
+  const bugunKey = kunKaliti(new Date());
 
   /**
    * Savdolarni KUNLAR bo'yicha guruhlaymiz va har bir kunga yakun chiqaramiz.
    * "Bugun qancha bo'ldi" — do'konchiga eng ko'p kerak bo'ladigan raqam.
+   *
+   * FAQAT BUGUNGI kun kartochkalari bilan ochiq turadi. Ilgari har bir
+   * kun ostida barcha savdo kartochkalari to'liq chizilardi — 3-4 kun
+   * oldingi savdoni ko'rish uchun o'sha kungacha bo'lgan o'nlab
+   * kartochkani scroll qilib o'tish kerak edi. Boshqa kunlar endi faqat
+   * sarlavha (jami + soni): bosilsa `/day/[date]` to'liq manzarani ochadi.
    */
   const sections = useMemo(() => {
     if (!items) return [];
@@ -59,9 +141,10 @@ export default function SalesScreen() {
       title: kun,
       jami: list.reduce((x, r) => x + Number(r.total), 0),
       foyda: list.reduce((x, r) => x + (Number(r.total) - Number(r.cost_total)), 0),
-      data: list,
+      soni: list.length,
+      data: kun === bugunKey ? list : [],
     }));
-  }, [items]);
+  }, [items, bugunKey]);
 
   useFocusEffect(useCallback(() => { load().catch(() => {}); }, [load]));
 
@@ -133,6 +216,10 @@ export default function SalesScreen() {
       <ScreenHeader
         title="Savdolar"
         subtitle={items ? `oxirgi ${items.length} ta · ${money(jamiSavdo)} so'm` : undefined}
+        secondaryAction={{
+          icon: 'kalendar', label: "Sanaga o'tish",
+          onPress: () => setSanaOchiq(true),
+        }}
         action={{
           icon: 'qoshish', label: 'Yangi savdo',
           onPress: () => router.push('/sale/new'),
@@ -140,14 +227,24 @@ export default function SalesScreen() {
       />
 
       {!items ? (
-        <View style={{ paddingHorizontal: spacing.lg }}><SkeletonList /></View>
+        xato ? (
+          // Ilgari bu holatda ekran ABADIY skeletonda qolardi — `xato`
+          // hech qayerda ko'rsatilmasdi. Server javob bermasa (uyquda,
+          // tarmoq uzilgan) do'konchi "ilova buzuq" deb qolardi.
+          <Empty
+            icon="ogohlantirish" title="Yuklab bo'lmadi" hint={xato}
+            action={{ title: 'Qayta urinish', icon: 'yangilash', onPress: () => load().catch(() => {}) }}
+          />
+        ) : (
+          <View style={{ paddingHorizontal: spacing.lg }}><SkeletonList /></View>
+        )
       ) : (
         <SectionList
           sections={sections}
           keyExtractor={(x) => x.id}
           contentContainerStyle={s.list}
           showsVerticalScrollIndicator={false}
-          stickySectionHeadersEnabled={false}
+          stickySectionHeadersEnabled
           renderSectionHeader={({ section }) => (
             <PressScale
               accessibilityRole="button"
@@ -161,7 +258,7 @@ export default function SalesScreen() {
                   {kunNomi(section.title)}
                 </Text>
                 <Text style={[font.tiny, { color: colors.textMuted }]}>
-                  {section.data.length} ta savdo · foyda {money(section.foyda)}
+                  {section.soni} ta savdo · foyda {money(section.foyda)}
                 </Text>
               </View>
               <Text style={[font.num, { color: colors.text }]}>{money(section.jami)}</Text>
@@ -239,6 +336,13 @@ export default function SalesScreen() {
                       dot
                     />
                     {item.source === 'ai' ? <Badge text="AI" tone="accent" /> : null}
+                    {/* Kim sotgani — bir nechta xodim ishlaydigan do'konda
+                        muhim: kunlik savdoni kim yozgani shu yerdan ko'rinadi. */}
+                    {item.seller_name ? (
+                      <Text style={[font.tiny, { color: colors.textFaint }]} numberOfLines={1}>
+                        {item.seller_name}
+                      </Text>
+                    ) : null}
                   </View>
                 </View>
 
@@ -291,6 +395,12 @@ export default function SalesScreen() {
           }}
         />
       )}
+
+      <SanaModal
+        visible={sanaOchiq}
+        onClose={() => setSanaOchiq(false)}
+        onPick={(iso) => { setSanaOchiq(false); router.push(`/day/${iso}`); }}
+      />
     </SafeAreaView>
   );
 }
@@ -318,5 +428,27 @@ const s = StyleSheet.create({
   detailRow: { flexDirection: 'row', gap: spacing.md, alignItems: 'center' },
   hintRow: {
     flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: spacing.xs,
+  },
+});
+
+const sm = StyleSheet.create({
+  backdrop: {
+    flex: 1, backgroundColor: colors.scrim, justifyContent: 'flex-end',
+  },
+  sheet: {
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl,
+    padding: spacing.xl, paddingBottom: spacing.xxl,
+    gap: spacing.md, ...elevation[3],
+  },
+  head: { flexDirection: 'row', alignItems: 'center' },
+  input: {
+    backgroundColor: colors.surfaceAlt, borderRadius: radius.md,
+    paddingHorizontal: spacing.md, height: 48, fontSize: 16, color: colors.text,
+  },
+  tezTugma: {
+    flex: 1, alignItems: 'center', paddingVertical: 10,
+    backgroundColor: colors.surfaceAlt, borderRadius: radius.md,
+    borderWidth: 1, borderColor: colors.border,
   },
 });

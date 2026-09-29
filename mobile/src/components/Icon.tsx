@@ -58,6 +58,7 @@ const ICONS = {
   yangilash:  ion('refresh-outline'),
   kalendar:   ion('calendar-outline'),
   foydalanuvchi: ion('person-outline'),
+  xodimlar:   ion('people-outline'),
 
   /* --- Tushunchalar --- */
   ai:            mat('robot-outline'),

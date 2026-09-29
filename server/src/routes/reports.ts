@@ -60,7 +60,10 @@ export default async function reportRoutes(app: FastifyInstance) {
     const q = z.object({
       from: z.string().optional(),
       to: z.string().optional(),
-      days: z.coerce.number().min(1).max(365).default(30),
+      // 3650 = 10 yil — "Hammasi" (butun davr) tanlanganda mobil
+      // `days=3650` yuboradi. 365 bilan chegaralangan bo'lganda bir yildan
+      // ko'p ishlagan do'kon "hammasi" bosganda hamon kesilgan raqam olardi.
+      days: z.coerce.number().min(1).max(3650).default(30),
     }).parse(req.query);
 
     if (q.from || q.to) {
@@ -149,8 +152,11 @@ export default async function reportRoutes(app: FastifyInstance) {
                 AND created_at < ${keyingiKun}
               ORDER BY created_at DESC`, [date, shop]),
 
-      query(`SELECT d.id, d.amount, d.note, d.created_at, c.name AS customer_name
-               FROM debts d JOIN customers c ON c.id = d.customer_id
+      query(`SELECT d.id, d.amount, d.note, d.created_at, c.name AS customer_name,
+                    u.name AS user_name
+               FROM debts d
+               JOIN customers c ON c.id = d.customer_id
+               LEFT JOIN users u ON u.id = d.user_id
               WHERE d.shop_id = $2
                 AND d.deleted_at IS NULL
                 AND d.created_at >= ${bounds}
@@ -183,7 +189,10 @@ export default async function reportRoutes(app: FastifyInstance) {
    */
   app.get('/top-products', async (req) => {
     const q = z.object({
-      days: z.coerce.number().min(1).max(365).default(30),
+      // 3650 = 10 yil — "Hammasi" (butun davr) tanlanganda mobil
+      // `days=3650` yuboradi. 365 bilan chegaralangan bo'lganda bir yildan
+      // ko'p ishlagan do'kon "hammasi" bosganda hamon kesilgan raqam olardi.
+      days: z.coerce.number().min(1).max(3650).default(30),
       limit: z.coerce.number().min(1).max(50).default(10),
       sort: z.enum(['tushum', 'foyda']).default('tushum'),
     }).parse(req.query);
@@ -224,7 +233,10 @@ export default async function reportRoutes(app: FastifyInstance) {
    */
   app.get('/loss-sales', async (req) => {
     const q = z.object({
-      days: z.coerce.number().min(1).max(365).default(30),
+      // 3650 = 10 yil — "Hammasi" (butun davr) tanlanganda mobil
+      // `days=3650` yuboradi. 365 bilan chegaralangan bo'lganda bir yildan
+      // ko'p ishlagan do'kon "hammasi" bosganda hamon kesilgan raqam olardi.
+      days: z.coerce.number().min(1).max(3650).default(30),
       limit: z.coerce.number().min(1).max(50).default(20),
     }).parse(req.query);
 

@@ -26,10 +26,10 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  FlatList, KeyboardAvoidingView, Platform, Pressable,
+  FlatList, Pressable,
   StyleSheet, Text, TextInput, View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import type { Product } from '../../src/api/types';
 import * as productStore from '../../src/data/products';
@@ -42,6 +42,7 @@ import { useConfirm } from '../../src/components/Confirm';
 import { ShtrixSkaner } from '../../src/components/ShtrixSkaner';
 import { YangiMahsulot } from '../../src/components/YangiMahsulot';
 import { haptic } from '../../src/lib/haptics';
+import { useKeyboardHeight } from '../../src/lib/keyboard';
 import {
   colors, elevation, font, money, qty as fq, radius, spacing,
 } from '../../src/theme';
@@ -83,6 +84,9 @@ export default function NewPurchaseScreen() {
    */
   const [yangiOchiq, setYangiOchiq] = useState(false);
   const [busy, setBusy] = useState(false);
+  const insets = useSafeAreaInsets();
+  /** Klaviatura balandligi — `sale/new.tsx` bilan bir xil qoida. */
+  const kb = useKeyboardHeight();
 
   // Katalog MAHALLIY cache'dan — savdo ekranidagi bilan bir xil yo'l.
   // Mol kelganda internet bo'lmasligi mumkin, kirim esa kutib turolmaydi.
@@ -218,11 +222,8 @@ export default function NewPurchaseScreen() {
   }
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={['top']}>
+      <View style={{ flex: 1 }}>
         <View style={s.bosh}>
           <Pressable onPress={() => router.back()} hitSlop={12}>
             <Icon name="yopish" size={24} color={colors.textMuted} />
@@ -235,6 +236,7 @@ export default function NewPurchaseScreen() {
         </View>
 
         <FlatList
+          style={{ flex: 1 }}
           data={qatorlar}
           keyExtractor={(q) => q.product.id}
           contentContainerStyle={s.royxat}
@@ -363,7 +365,10 @@ export default function NewPurchaseScreen() {
         />
 
         {qatorlar.length > 0 && (
-          <View style={s.pastki}>
+          <View style={[s.pastki, {
+            marginBottom: kb,
+            paddingBottom: kb > 0 ? spacing.md : spacing.lg + insets.bottom,
+          }]}>
             <Field
               label="Yetkazib beruvchi (ixtiyoriy)"
               placeholder="Masalan: Asil bliss pishiriqlar"
@@ -397,7 +402,7 @@ export default function NewPurchaseScreen() {
             />
           </View>
         )}
-      </KeyboardAvoidingView>
+      </View>
 
       {/* Yangi tovar shu yerda qo'shiladi va darhol ro'yxatga tushadi. */}
       <YangiMahsulot
@@ -543,7 +548,7 @@ const s = StyleSheet.create({
   },
   pastki: {
     gap: spacing.md,
-    paddingHorizontal: spacing.lg, paddingTop: spacing.md, paddingBottom: spacing.lg,
+    paddingHorizontal: spacing.lg, paddingTop: spacing.md,
     backgroundColor: colors.surface,
     borderTopWidth: 1, borderTopColor: colors.borderSoft,
   },

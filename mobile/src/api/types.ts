@@ -4,6 +4,15 @@ export type PaymentMethod = 'naqd' | 'karta' | 'qarz' | 'aralash';
 export interface User { id: string; shop_id: string; role: 'owner' | 'seller'; name: string }
 export interface Shop { id: string; name: string; currency: string }
 
+/** `GET /auth/staff` — faqat do'kon egasiga ko'rinadi. */
+export interface Employee {
+  id: string; name: string; phone: string;
+  role: 'owner' | 'seller'; is_active: boolean; created_at: string;
+  /** Bugungi faoliyat — ro'yxatning o'zi shu bilan "statistika" bo'ladi. */
+  today_sales_count: number; today_sales_total: number;
+  today_debt_given: number; today_debt_collected: number;
+}
+
 export interface Product {
   id: string; name: string; barcode: string | null; unit: Unit;
   /**

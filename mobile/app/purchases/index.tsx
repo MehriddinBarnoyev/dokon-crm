@@ -66,7 +66,7 @@ export default function PurchasesScreen() {
 
   const olib = useCallback(
     () => api<Kirim[]>(`/purchases?from=${from}&limit=500`), [from]);
-  const { data: items, yangila: load } = useKeshlangan<Kirim[]>(`purchases.${kun}`, olib);
+  const { data: items, xato, yangila: load } = useKeshlangan<Kirim[]>(`purchases.${kun}`, olib);
 
   const olibAylanma = useCallback(
     () => api<TovarAylanma>(`/purchases/meta/aylanma?from=${from}`), [from]);
@@ -164,7 +164,14 @@ export default function PurchasesScreen() {
       </View>
 
       {!items ? (
-        <View style={{ paddingHorizontal: spacing.lg }}><SkeletonList /></View>
+        xato ? (
+          <Empty
+            icon="ogohlantirish" title="Yuklab bo'lmadi" hint={xato}
+            action={{ title: 'Qayta urinish', icon: 'yangilash', onPress: () => load().catch(() => {}) }}
+          />
+        ) : (
+          <View style={{ paddingHorizontal: spacing.lg }}><SkeletonList /></View>
+        )
       ) : (
         <SectionList
           sections={sections}

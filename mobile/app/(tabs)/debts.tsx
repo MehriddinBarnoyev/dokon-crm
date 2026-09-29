@@ -43,7 +43,7 @@ export default function DebtsScreen() {
   // Ikki filtr — ikki alohida kesh kaliti, aks holda biri ikkinchisini bosardi.
   const olib = useCallback(
     () => api<Debtor[]>(`/debts${onlyOwing ? '?only_owing=1' : ''}`), [onlyOwing]);
-  const { data: items, yangila: load } = useKeshlangan<Debtor[]>(
+  const { data: items, xato, yangila: load } = useKeshlangan<Debtor[]>(
     onlyOwing ? 'debts.qarzdor' : 'debts.hammasi', olib);
 
   useFocusEffect(useCallback(() => { load().catch(() => {}); }, [load]));
@@ -58,10 +58,19 @@ export default function DebtsScreen() {
     () => customerStore.qidir(items ?? [], q),
     [items, q]);
 
-  // Yuqoridagi karta — QIDIRUVDAN qat'i nazar butun ro'yxat bo'yicha:
-  // "umumiy qarz" bir mijozni qidirgani uchun o'zgarib ketmasligi kerak.
-  const total = (items ?? []).reduce((s, d) => s + Number(d.balance), 0);
-  const overdue = (items ?? []).filter((d) => d.overdue).length;
+  /**
+   * Yuqoridagi karta — QIDIRUVDAN va TABDAN qat'i nazar: "umumiy qarz"
+   * real qarzdorlik, u qaysi filtr tanlanganiga qarab o'zgarmasligi kerak.
+   *
+   * "Barcha mijozlar" tabida `items` HAMMA mijozni oladi — shu jumladan
+   * ortiqcha to'lagan (balansi manfiy) mijozlarni ham. Manfiylarni ham
+   * qo'shib yig'indi chiqarilsa, "Qarzi borlar" tabidagidan KICHIKROQ
+   * raqam chiqadi — xuddi shu farq shikoyat qilingan edi. `balance > 0`
+   * filtri ikkala tabda ham bir xil natija berishini kafolatlaydi.
+   */
+  const qarzdorlar = (items ?? []).filter((d) => Number(d.balance) > 0);
+  const total = qarzdorlar.reduce((s, d) => s + Number(d.balance), 0);
+  const overdue = qarzdorlar.filter((d) => d.overdue).length;
   const qidirilmoqda = q.trim().length > 0;
 
   return (
@@ -126,7 +135,14 @@ export default function DebtsScreen() {
       </View>
 
       {!items ? (
-        <View style={{ paddingHorizontal: spacing.lg }}><SkeletonList rows={5} /></View>
+        xato ? (
+          <Empty
+            icon="ogohlantirish" title="Yuklab bo'lmadi" hint={xato}
+            action={{ title: 'Qayta urinish', icon: 'yangilash', onPress: () => load().catch(() => {}) }}
+          />
+        ) : (
+          <View style={{ paddingHorizontal: spacing.lg }}><SkeletonList rows={5} /></View>
+        )
       ) : (
         <FlatList
           data={shown}

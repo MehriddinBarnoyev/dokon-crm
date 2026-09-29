@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  FlatList, KeyboardAvoidingView, Platform, Pressable,
+  FlatList, Pressable,
   StyleSheet, Text, TextInput, View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { api } from '../../src/api/client';
@@ -22,6 +22,7 @@ import * as cache from '../../src/lib/cache';
 import * as outbox from '../../src/lib/outbox';
 import * as chek from '../../src/lib/chek';
 import { haptic } from '../../src/lib/haptics';
+import { useKeyboardHeight } from '../../src/lib/keyboard';
 import { colors, elevation, family, font, money, qty as fq, radius, spacing } from '../../src/theme';
 import { Icon } from '../../src/components/Icon';
 
@@ -243,6 +244,16 @@ export default function NewSaleScreen() {
    */
   const [yangiOchiq, setYangiOchiq] = useState(false);
   const [busy, setBusy] = useState(false);
+  const insets = useSafeAreaInsets();
+  /**
+   * KLAVIATURA. `KeyboardAvoidingView` bu ekranda pastdagi "Saqlash"
+   * panelini to'liq ko'tarmasdi: FlatList `flex`siz edi, klaviatura
+   * ochilganda panel ekran tagida, klaviatura ostida qolib ketardi
+   * (eng ko'p ko'rinadigan joyi — iOS'da "Jami"/tugma qirqilib qolar edi).
+   * Qolgan formalar (`expense/new.tsx`, `product/new.tsx`) bilan bir xil
+   * qoida: balandlikni o'zimiz o'lchab, panelni qo'lda ko'taramiz.
+   */
+  const kb = useKeyboardHeight();
 
   /**
    * Katalog MAHALLIY cache'dan keladi — butunligicha, `?limit=300` siz.
@@ -562,14 +573,12 @@ export default function NewSaleScreen() {
   }
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={['top']}>
+      <View style={{ flex: 1 }}>
         <ModalHeader title="Yangi savdo" onClose={() => router.back()} />
 
         <FlatList
+          style={{ flex: 1 }}
           data={cart}
           keyExtractor={(l) => l.product.id}
           contentContainerStyle={s.list}
@@ -684,7 +693,10 @@ export default function NewSaleScreen() {
         />
 
         {cart.length > 0 && (
-          <View style={s.footer}>
+          <View style={[s.footer, {
+            marginBottom: kb,
+            paddingBottom: kb > 0 ? spacing.md : spacing.lg + insets.bottom,
+          }]}>
             <View style={{ flexDirection: 'row', gap: spacing.sm }}>
               {(['naqd', 'karta', 'qarz', 'aralash'] as PaymentMethod[]).map((m) => (
                 <Pressable
@@ -802,7 +814,7 @@ export default function NewSaleScreen() {
             />
           </View>
         )}
-      </KeyboardAvoidingView>
+      </View>
 
       <ShtrixSkaner
         visible={skanerOchiq}
@@ -921,7 +933,7 @@ const s = StyleSheet.create({
   footer: {
     backgroundColor: colors.surface,
     borderTopWidth: 1, borderTopColor: colors.border,
-    padding: spacing.lg, gap: spacing.md,
+    paddingHorizontal: spacing.lg, paddingTop: spacing.lg, gap: spacing.md,
   },
   customerRow: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.md,
