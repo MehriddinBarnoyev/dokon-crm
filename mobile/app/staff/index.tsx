@@ -30,10 +30,24 @@ export default function StaffScreen() {
   const confirm = useConfirm();
   const toast = useToast();
   const [items, setItems] = useState<Employee[] | null>(null);
+  const [xato, setXato] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
+  /**
+   * Xato ko'rsatilishi SHART — busiz server javob bermasa (uyquda, tarmoq
+   * uzilgan) ekran abadiy skeletonda "muzlab" qolardi: na xato, na qayta
+   * urinish tugmasi. Boshqa ro'yxat ekranlarida (`lib/keshRoyxat.ts`) bu
+   * allaqachon hal qilingan, bu yerda oddiy `useState` bilan yozilgani
+   * uchun alohida qo'shilishi kerak edi.
+   */
   const load = useCallback(async () => {
-    setItems(await api<Employee[]>('/auth/staff'));
+    try {
+      const yangi = await api<Employee[]>('/auth/staff');
+      setItems(yangi);
+      setXato(null);
+    } catch (e: any) {
+      setXato(e?.message ?? 'Xatolik');
+    }
   }, []);
 
   // Faqat egasi kira oladi — sotuvchi to'g'ridan-to'g'ri havola orqali
@@ -41,7 +55,7 @@ export default function StaffScreen() {
   // darhol qaytaradi.
   useFocusEffect(useCallback(() => {
     if (user && user.role !== 'owner') { router.replace('/(tabs)'); return; }
-    load().catch(() => {});
+    load();
   }, [load, user]));
 
   async function toggle(e: Employee) {
@@ -87,7 +101,14 @@ export default function StaffScreen() {
       />
 
       {!items ? (
-        <View style={{ paddingHorizontal: spacing.lg }}><SkeletonList /></View>
+        xato ? (
+          <Empty
+            icon="ogohlantirish" title="Yuklab bo'lmadi" hint={xato}
+            action={{ title: 'Qayta urinish', icon: 'yangilash', onPress: load }}
+          />
+        ) : (
+          <View style={{ paddingHorizontal: spacing.lg }}><SkeletonList /></View>
+        )
       ) : (
         <ScrollView
           contentContainerStyle={s.scroll}
@@ -96,7 +117,7 @@ export default function StaffScreen() {
             <RefreshControl
               refreshing={refreshing} tintColor={colors.primary}
               onRefresh={async () => {
-                setRefreshing(true); await load().catch(() => {}); setRefreshing(false);
+                setRefreshing(true); await load(); setRefreshing(false);
               }}
             />
           }

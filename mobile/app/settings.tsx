@@ -31,6 +31,7 @@ export default function SettingsScreen() {
 
   const [navbat, setNavbat] = useState<outbox.Mutation[]>([]);
   const [radEtilgan, setRadEtilgan] = useState<outbox.Rejected[]>([]);
+  const [chiqilmoqda, setChiqilmoqda] = useState(false);
 
   const yuklaNavbat = useCallback(async () => {
     const r = await outbox.royxat();
@@ -58,7 +59,21 @@ export default function SettingsScreen() {
       confirmText: 'Chiqish',
       destructive: true,
     });
-    if (ok) await logout();
+    if (!ok) return;
+
+    /*
+     * `logout()` navbatni yuborishga urinadi (yuqoridagi ogohlantirish
+     * shuni aytadi) — server sekin javob bersa bu bir necha soniya
+     * ketishi mumkin. Tugma shu vaqt davomida hech narsa demasa, ilova
+     * "muzlab qolgandek" ko'rinadi. Spinner aynan shu taassurotni oldini
+     * oladi — kutish sababli emas, xabar yo'qligi sababli "freeze".
+     */
+    setChiqilmoqda(true);
+    try {
+      await logout();
+    } finally {
+      setChiqilmoqda(false);
+    }
   }
 
   return (
@@ -203,6 +218,7 @@ export default function SettingsScreen() {
           variant="danger"
           icon="chiqish"
           onPress={askLogout}
+          loading={chiqilmoqda}
           style={{ marginTop: spacing.sm }}
         />
 

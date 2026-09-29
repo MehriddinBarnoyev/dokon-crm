@@ -75,8 +75,19 @@ function AuthGate() {
     if (loading) return;
     const inAuthScreen = segments[0] === 'login';
 
-    if (!user && !inAuthScreen) router.replace('/login');
-    else if (user && inAuthScreen) router.replace('/(tabs)');
+    if (!user && !inAuthScreen) {
+      /*
+       * Seans tugaganda (chiqish yoki server 401) ustma-ust ochiq modal
+       * bo'lishi mumkin (masalan Sozlamalar, Yangi savdo). `replace` faqat
+       * JORIY ekranni almashtiradi — native modal taqdimotini YOPMAYDI,
+       * chunki bu OS darajasidagi alohida holat, oddiy ekran emas. Natijada
+       * `user` allaqachon bo'sh bo'lsa ham modal ekranda osilib qolardi —
+       * "chiqish bosilgandi, hech narsa bo'lmadi" degan taassurot shundan.
+       * Avval BARCHA modallarni yopamiz, keyin kirish ekraniga o'tamiz.
+       */
+      if (router.canDismiss()) router.dismissAll();
+      router.replace('/login');
+    } else if (user && inAuthScreen) router.replace('/(tabs)');
   }, [user, loading, segments]);
 
   if (loading) return <Splash />;
